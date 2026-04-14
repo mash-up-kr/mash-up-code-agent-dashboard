@@ -56,6 +56,44 @@ body {
 .t-tool_use       { color: #7dd3fc; }
 .t-unknown        { color: #64748b; }
 
+/* ── Floating mascot ─────────────────────────── */
+.mascot {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  transition: left 4s cubic-bezier(0.4, 0, 0.2, 1), top 4s cubic-bezier(0.4, 0, 0.2, 1);
+  filter: drop-shadow(0 8px 24px rgba(96, 70, 255, 0.15));
+}
+
+.mascot-img {
+  width: 120px;
+  height: auto;
+  image-rendering: pixelated;
+  animation: mascot-float 3s ease-in-out infinite;
+}
+
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25%      { transform: translateY(-8px) rotate(1deg); }
+  75%      { transform: translateY(4px) rotate(-1deg); }
+}
+
+.mascot-label {
+  text-align: center;
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  color: #c6bfff;
+  background: rgba(96, 70, 255, 0.12);
+  border: 1px solid rgba(96, 70, 255, 0.25);
+  border-radius: 4px;
+  padding: 1px 8px;
+  margin-top: 4px;
+  white-space: nowrap;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* ── Tab active glow ─────────────────────────── */
 .tab-btn {
   position: relative;

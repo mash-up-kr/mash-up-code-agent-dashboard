@@ -99,6 +99,7 @@ document.getElementById('btn-chat-close')?.addEventListener('click', () => chatD
    ══════════════════════════════════════════════════ */
 function renderSessions() {
   updateStatusCounts();
+  syncMascots();
   if (!sessionsEl) return;
 
   if (sessions.size === 0) {
@@ -394,3 +395,63 @@ function trackEventType(ev) {
 }
 
 connect();
+
+/* ══════════════════════════════════════════════════
+   Floating Mascots (one per session)
+   ══════════════════════════════════════════════════ */
+const mascotContainer = document.getElementById('mascot-container');
+const canvas = document.getElementById('view-workspace');
+const activeMascots = new Map(); // pid -> { el, interval }
+
+function syncMascots() {
+  if (!mascotContainer || !canvas) return;
+
+  // Add mascots for new sessions
+  for (const [pid, s] of sessions) {
+    if (activeMascots.has(pid)) continue;
+
+    const el = document.createElement('div');
+    el.className = 'mascot';
+    el.innerHTML = `
+      <img src="/img/mascot.png" alt="${esc(s.name || 'mascot')}" class="mascot-img" draggable="false">
+      <div class="mascot-label">${esc(s.name || pid)}</div>`;
+
+    // Random initial position
+    const cw = canvas.clientWidth || 800;
+    const ch = canvas.clientHeight || 600;
+    el.style.left = (Math.random() * (cw - 160) + 20) + 'px';
+    el.style.top  = (Math.random() * (ch - 160) + 20) + 'px';
+
+    // Random float delay so they don't all bob in sync
+    el.style.animationDelay = (Math.random() * -3) + 's';
+
+    mascotContainer.appendChild(el);
+
+    // Each mascot wanders independently
+    const interval = setInterval(() => wanderMascot(el), 4000 + Math.random() * 3000);
+    setTimeout(() => wanderMascot(el), 1000 + Math.random() * 2000);
+
+    activeMascots.set(pid, { el, interval });
+  }
+
+  // Remove mascots for ended sessions
+  for (const [pid, m] of activeMascots) {
+    if (!sessions.has(pid)) {
+      m.el.style.opacity = '0';
+      m.el.style.transition = 'opacity 0.8s';
+      clearInterval(m.interval);
+      setTimeout(() => m.el.remove(), 800);
+      activeMascots.delete(pid);
+    }
+  }
+}
+
+function wanderMascot(el) {
+  if (!canvas) return;
+  const cw = canvas.clientWidth;
+  const ch = canvas.clientHeight;
+  const x = Math.random() * (cw - 160) + 20;
+  const y = Math.random() * (ch - 160) + 20;
+  el.style.left = x + 'px';
+  el.style.top  = y + 'px';
+}
