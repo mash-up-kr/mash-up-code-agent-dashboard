@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html class="dark" lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Agent Viz</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-dim": "#12131a",
+            "background": "#12131a",
+            "on-surface": "#e3e1ec",
+            "on-surface-variant": "#c8c4d9",
+            "surface-container": "#1e1f27",
+            "surface-container-low": "#1a1b23",
+            "surface-container-high": "#292931",
+            "surface-container-highest": "#34343c",
+            "surface-container-lowest": "#0d0e15",
+            "outline": "#928ea2",
+            "outline-variant": "#474556",
+            "primary": "#c6bfff",
+            "primary-container": "#6046ff",
+            "on-primary-container": "#ebe6ff",
+            "tertiary": "#45dfa4",
+            "error": "#ffb4ab",
+            "secondary": "#ffb2b6",
+          },
+          fontFamily: {
+            headline: ["Space Grotesk"],
+            body: ["Inter"],
+            mono: ["Fira Code", "monospace"],
+          },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="overflow-hidden bg-[#0a0b12] text-[#e3e1ec] font-body min-h-screen flex flex-col">
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- TopNavBar                                       -->
+<!-- ═══════════════════════════════════════════════ -->
+<header class="h-16 bg-[#13151f] flex items-center justify-between px-6 z-50 flex-shrink-0 border-b border-[#252838]/30">
+  <div class="flex items-center gap-4">
+    <span class="text-xl font-bold text-slate-50 font-headline tracking-tight">매숑이 작업실</span>
+  </div>
+  <div class="flex items-center gap-6">
+    <!-- Session info -->
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-slate-400 font-mono" id="header-session-label">Session: --</span>
+      <span id="status-pill" class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/10 text-red-400 text-xs font-bold">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+        CONNECTING
+      </span>
+    </div>
+    <!-- Clock -->
+    <div class="text-sm text-slate-400 font-mono" id="header-time"></div>
+    <!-- Action buttons -->
+    <div class="flex items-center gap-2">
+      <button class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">notifications</span>
+      </button>
+      <button id="btn-chat-toggle" class="p-2 text-[#6046ff] bg-[#6046ff]/10 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">forum</span>
+      </button>
+      <button class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">settings</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="flex flex-1 overflow-hidden">
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- SideNavBar                                      -->
+<!-- ═══════════════════════════════════════════════ -->
+<aside class="w-64 bg-[#0a0b12] border-r border-[#252838] flex flex-col flex-shrink-0 text-sm">
+
+  <!-- Console badge -->
+  <div class="px-6 py-4 border-b border-[#252838]/50">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded bg-[#6046ff]/20 flex items-center justify-center text-[#6046ff]">
+        <span class="material-symbols-outlined text-sm">terminal</span>
+      </div>
+      <div>
+        <div class="text-xs font-bold text-[#6046ff]">System Console</div>
+        <div class="text-[10px] text-slate-500">v1.0.4-stable</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scrollable nav sections -->
+  <nav class="flex-1 overflow-y-auto py-4 space-y-6">
+
+    <!-- MCP Servers -->
+    <div class="px-4">
+      <div class="flex items-center justify-between mb-2 px-2">
+        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">MCP 서버</span>
+        <span class="material-symbols-outlined text-xs text-slate-500 cursor-pointer">expand_more</span>
+      </div>
+      <div class="space-y-1" id="mcp-list">
+        <!-- Populated by JS / placeholder -->
+        <div class="flex items-center justify-between p-2 rounded hover:bg-[#1c1f2e] transition-all cursor-pointer group">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-sm text-[#6046ff]">dns</span>
+            <span class="font-bold text-slate-300">Auth-Service</span>
+          </div>
+          <div class="w-8 h-4 rounded-full bg-[#6046ff] relative">
+            <div class="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white"></div>
+          </div>
+        </div>
+        <div class="flex items-center justify-between p-2 rounded hover:bg-[#1c1f2e] transition-all cursor-pointer group">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-sm text-[#6046ff]">dns</span>
+            <span class="font-bold text-slate-300">Data-Mesh</span>
+          </div>
+          <div class="w-8 h-4 rounded-full bg-[#6046ff] relative">
+            <div class="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agents -->
+    <div class="px-4">
+      <div class="flex items-center justify-between mb-2 px-2">
+        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">에이전트</span>
+        <span class="material-symbols-outlined text-xs text-slate-500 cursor-pointer">expand_more</span>
+      </div>
+      <div class="space-y-1" id="agent-list">
+        <!-- Populated dynamically by JS -->
+      </div>
+    </div>
+
+    <!-- Sessions -->
+    <div class="px-4">
+      <div class="flex items-center justify-between mb-2 px-2">
+        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">세션</span>
+        <span class="material-symbols-outlined text-xs text-slate-500 cursor-pointer">expand_more</span>
+      </div>
+      <div class="space-y-2" id="session-list">
+        <!-- Populated dynamically by JS -->
+      </div>
+    </div>
+
+  </nav>
+
+  <!-- New Instance button -->
+  <div class="p-4 border-t border-[#252838]/50">
+    <button class="w-full py-2 bg-[#6046ff] text-white rounded font-bold text-xs flex items-center justify-center gap-2 hover:bg-[#725bff] transition-colors">
+      <span class="material-symbols-outlined text-sm">add</span>
+      New Instance
+    </button>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Main Content                                    -->
+<!-- ═══════════════════════════════════════════════ -->
+<main class="flex-1 flex flex-col bg-[#0a0b12] relative overflow-hidden">
+
+  <!-- Tab bar -->
+  <div class="h-12 bg-[#13151f] flex items-center px-6 gap-8 border-b border-[#252838]/30 flex-shrink-0">
+    <button class="tab-btn tab-btn--active h-full border-b-2 border-[#6046ff] text-[#6046ff] font-bold text-sm px-2 flex items-center gap-2" data-tab="workspace">
+      <span class="material-symbols-outlined text-[18px]">edit_square</span>
+      매숑이 작업실
+    </button>
+    <button class="tab-btn h-full border-b-2 border-transparent text-slate-500 hover:text-slate-300 transition-colors text-sm px-2 flex items-center gap-2" data-tab="dashboard">
+      <span class="material-symbols-outlined text-[18px]">payments</span>
+      사용량 &amp; 비용
+    </button>
+  </div>
+
+  <!-- ─── View: 매숑이 작업실 ───────────────────── -->
+  <div id="view-workspace" class="view-panel flex-1 relative overflow-hidden bg-[#0d0f18] dot-grid">
+
+    <!-- Empty state -->
+    <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-20" id="canvas-empty">
+      <div class="w-24 h-24 mb-4 border border-dashed border-[#6046ff]/40 rounded-xl flex items-center justify-center">
+        <span class="material-symbols-outlined text-4xl text-[#6046ff]">drag_pan</span>
+      </div>
+      <p class="text-sm font-headline tracking-widest uppercase">Canvas Ready</p>
+    </div>
+
+    <!-- Event log panel (floating) -->
+    <div class="absolute top-4 left-4 w-[560px] max-h-[calc(100%-80px)] bg-[#13151f]/92 backdrop-blur-xl border border-[#252838] rounded-lg flex flex-col overflow-hidden z-10">
+      <div class="px-4 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-[#252838] flex items-center justify-between flex-shrink-0">
+        <span>Event Log</span>
+        <span class="text-[10px] font-bold text-[#6046ff] bg-[#6046ff]/10 px-2 py-0.5 rounded-full" id="event-count">0</span>
+      </div>
+      <div class="flex-1 overflow-y-auto py-1" id="event-log-body">
+        <div class="py-8 text-center text-slate-600 text-xs" id="log-empty">Waiting for events...</div>
+      </div>
+    </div>
+
+    <!-- Floating toolbar -->
+    <div class="absolute top-6 right-6 flex items-center gap-2 bg-[#1c1f2e]/80 backdrop-blur-md border border-[#252838] p-1.5 rounded-lg shadow-2xl z-10">
+      <button class="w-8 h-8 flex items-center justify-center rounded text-slate-400 hover:bg-[#292931] hover:text-slate-100 transition-all">
+        <span class="material-symbols-outlined text-[20px]">zoom_in</span>
+      </button>
+      <button class="w-8 h-8 flex items-center justify-center rounded text-slate-400 hover:bg-[#292931] hover:text-slate-100 transition-all">
+        <span class="material-symbols-outlined text-[20px]">zoom_out</span>
+      </button>
+      <div class="w-px h-4 bg-[#252838] mx-1"></div>
+      <button class="px-3 h-8 flex items-center gap-1.5 rounded text-xs font-bold text-slate-300 hover:bg-[#292931] hover:text-slate-100 transition-all">
+        <span class="material-symbols-outlined text-[16px]">fullscreen</span>
+        전체 보기
+      </button>
+    </div>
+
+    <!-- Status overlay (bottom-left) -->
+    <div class="absolute bottom-6 left-6 font-mono text-[10px] text-slate-500 space-y-1 z-10">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span>Stream active</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-[#6046ff]">events:</span> <span id="status-event-count">0</span>
+        <span class="text-[#6046ff] ml-2">sessions:</span> <span id="status-session-count">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── View: 사용량 & 비용 ───────────────────── -->
+  <div id="view-dashboard" class="view-panel flex-1 overflow-y-auto p-8 hidden">
+
+    <!-- Stat cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div class="bg-[#13151f] border border-[#252838] rounded-xl p-6 relative overflow-hidden group hover:border-[#6046ff]/50 transition-colors">
+        <span class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 block">총 토큰 사용량</span>
+        <div class="flex items-end gap-2">
+          <span class="text-3xl font-headline font-bold text-white tracking-tight" id="stat-total-events">0</span>
+          <span class="text-emerald-500 text-xs mb-1.5 flex items-center gap-0.5">
+            <span class="material-symbols-outlined text-[10px]" style="font-variation-settings:'FILL' 1">trending_up</span>
+            live
+          </span>
+        </div>
+        <div class="absolute -right-4 -bottom-4 opacity-5 group-hover:opacity-10 transition-opacity">
+          <span class="material-symbols-outlined text-8xl">token</span>
+        </div>
+      </div>
+
+      <div class="bg-[#13151f] border border-[#252838] rounded-xl p-6 relative overflow-hidden group hover:border-[#6046ff]/50 transition-colors">
+        <span class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 block">총 비용 (USD)</span>
+        <div class="flex items-end gap-2">
+          <span class="text-3xl font-headline font-bold text-white tracking-tight" id="stat-cost">$0.00</span>
+          <span class="text-rose-500 text-xs mb-1.5 flex items-center gap-0.5">
+            <span class="material-symbols-outlined text-[10px]" style="font-variation-settings:'FILL' 1">trending_up</span>
+            est.
+          </span>
+        </div>
+        <div class="absolute -right-4 -bottom-4 opacity-5 group-hover:opacity-10 transition-opacity">
+          <span class="material-symbols-outlined text-8xl">payments</span>
+        </div>
+      </div>
+
+      <div class="bg-[#13151f] border border-[#252838] rounded-xl p-6 relative overflow-hidden group hover:border-[#6046ff]/50 transition-colors">
+        <span class="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 block">이번 주 세션 수</span>
+        <div class="flex items-end gap-2">
+          <span class="text-3xl font-headline font-bold text-white tracking-tight" id="stat-active-sessions">0</span>
+          <span class="text-slate-500 text-xs mb-1.5 flex items-center gap-0.5">
+            <span class="material-symbols-outlined text-[10px]" style="font-variation-settings:'FILL' 1">remove</span>
+            0%
+          </span>
+        </div>
+        <div class="absolute -right-4 -bottom-4 opacity-5 group-hover:opacity-10 transition-opacity">
+          <span class="material-symbols-outlined text-8xl">terminal</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+
+      <!-- Bar chart: Event distribution -->
+      <div class="bg-[#13151f] border border-[#252838] rounded-xl p-6">
+        <div class="flex justify-between items-center mb-6">
+          <h3 class="text-white font-headline font-semibold text-lg flex items-center gap-2">
+            <span class="w-1 h-4 bg-[#6046ff] rounded-full"></span>
+            Daily Token Usage
+          </h3>
+          <span class="text-xs text-slate-500 font-mono bg-[#0d0e15] border border-[#474556]/30 rounded-lg px-3 py-1">Last 7 Days</span>
+        </div>
+        <div class="h-64 flex items-end gap-4 px-2" id="chart-bars">
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">MON</span></div>
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">TUE</span></div>
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">WED</span></div>
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">THU</span></div>
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">FRI</span></div>
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">SAT</span></div>
+          <div class="flex-1 flex flex-col items-center"><div class="w-full bg-[#1c1f2e] rounded-t-lg h-[5%]"></div><span class="mt-4 text-[10px] font-mono text-slate-500">SUN</span></div>
+        </div>
+      </div>
+
+      <!-- Line chart: Cumulative Cost -->
+      <div class="bg-[#13151f] border border-[#252838] rounded-xl p-6 flex flex-col">
+        <div class="flex justify-between items-center mb-6">
+          <h3 class="text-white font-headline font-semibold text-lg flex items-center gap-2">
+            <span class="w-1 h-4 bg-[#6046ff] rounded-full"></span>
+            Cumulative Cost
+          </h3>
+          <span class="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" id="sync-label">Sync: --</span>
+        </div>
+        <div class="flex-1 relative mt-4">
+          <svg class="w-full h-full min-h-[220px]" viewBox="0 0 400 200" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#6046ff" stop-opacity="0.3"/>
+                <stop offset="100%" stop-color="#6046ff" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <line x1="0" y1="50" x2="400" y2="50" stroke="#252838" stroke-width="1"/>
+            <line x1="0" y1="100" x2="400" y2="100" stroke="#252838" stroke-width="1"/>
+            <line x1="0" y1="150" x2="400" y2="150" stroke="#252838" stroke-width="1"/>
+            <path id="timeline-area" d="M0,200 L400,200 Z" fill="url(#lineGrad)"/>
+            <path id="timeline-line" d="M0,200" fill="none" stroke="#6046ff" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="mt-4 pt-4 border-t border-[#252838]/50 flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <div class="flex items-center gap-1.5">
+              <div class="w-2 h-2 rounded-full bg-[#6046ff]"></div>
+              <span class="text-xs text-slate-400">Projected</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <div class="w-2 h-2 rounded-full bg-slate-600"></div>
+              <span class="text-xs text-slate-400">Last Month</span>
+            </div>
+          </div>
+          <span class="text-xs font-mono text-[#6046ff] font-bold" id="cost-estimate">Estimated $0.00 EOM</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cost breakdown table -->
+    <div class="bg-[#13151f] border border-[#252838] rounded-xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-[#252838] flex items-center justify-between">
+        <h3 class="text-white font-semibold text-sm">최근 세션별 비용 상세</h3>
+        <button class="text-[#6046ff] text-xs font-bold hover:underline">Download CSV</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-[#0d0e15] text-slate-500 text-xs font-mono">
+            <tr>
+              <th class="px-6 py-3 font-medium">Session ID</th>
+              <th class="px-6 py-3 font-medium">Type</th>
+              <th class="px-6 py-3 font-medium">Events</th>
+              <th class="px-6 py-3 font-medium text-right">Cost</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[#252838]/50 text-slate-300" id="event-table-body">
+            <tr><td colspan="4" class="px-6 py-8 text-center text-slate-600 text-xs">No sessions recorded</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Communication Hub (Right Drawer)                -->
+<!-- ═══════════════════════════════════════════════ -->
+<aside id="chat-drawer" class="chat-drawer closed fixed right-0 top-16 h-[calc(100vh-64px)] w-80 z-40 bg-[#0a0b12] border-l border-[#252838] flex flex-col shadow-[0_8px_32px_rgba(96,70,255,0.08)]">
+
+  <!-- Header -->
+  <div class="p-4 border-b border-[#252838]/50 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="material-symbols-outlined text-[#6046ff] text-lg">chat_bubble</span>
+      <span class="text-sm font-bold text-slate-200 uppercase tracking-widest">Communication Hub</span>
+    </div>
+    <div class="flex items-center gap-1">
+      <button class="text-slate-500 hover:text-slate-300 transition-colors p-1 cursor-pointer">
+        <span class="material-symbols-outlined text-sm">more_vert</span>
+      </button>
+      <button id="btn-chat-close" class="text-slate-500 hover:text-slate-300 transition-colors p-1 cursor-pointer">
+        <span class="material-symbols-outlined text-sm">close</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+    <!-- Sample message -->
+    <div class="flex gap-3">
+      <div class="w-8 h-8 rounded bg-[#c6bfff]/10 flex-shrink-0 flex items-center justify-center border border-[#c6bfff]/20">
+        <span class="material-symbols-outlined text-[#c6bfff] text-lg">account_circle</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline justify-between mb-1">
+          <span class="font-bold text-slate-300 font-mono">dev_kim</span>
+          <span class="text-[9px] text-slate-500">14:22:05</span>
+        </div>
+        <div class="bg-[#1c1f2e] p-2.5 rounded border border-[#252838] text-slate-400 leading-relaxed">
+          ALPHA-01 인스턴스에서 메모리 누수 감지됨. 점검 부탁드려요.
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-3">
+      <div class="w-8 h-8 rounded bg-[#68fcbf]/10 flex-shrink-0 flex items-center justify-center border border-[#68fcbf]/20">
+        <span class="material-symbols-outlined text-[#68fcbf] text-lg">person_search</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline justify-between mb-1">
+          <span class="font-bold text-slate-300 font-mono">mace_01</span>
+          <span class="text-[9px] text-slate-500">14:25:12</span>
+        </div>
+        <div class="bg-[#1c1f2e] p-2.5 rounded border border-[#252838] text-slate-400 leading-relaxed">
+          확인했습니다. Logic-Parser 에이전트 재시작하겠습니다.
+        </div>
+      </div>
+    </div>
+    <!-- System divider -->
+    <div class="py-2 flex items-center gap-2 px-1">
+      <div class="h-px flex-1 bg-gradient-to-r from-transparent via-[#252838] to-transparent"></div>
+      <span class="text-[9px] font-mono text-slate-600 uppercase">System Event</span>
+      <div class="h-px flex-1 bg-gradient-to-r from-transparent via-[#252838] to-transparent"></div>
+    </div>
+    <div class="flex gap-3">
+      <div class="w-8 h-8 rounded bg-[#6046ff]/10 flex-shrink-0 flex items-center justify-center border border-[#6046ff]/20">
+        <span class="material-symbols-outlined text-[#6046ff] text-lg">smart_toy</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline justify-between mb-1">
+          <span class="font-bold text-[#c6bfff] font-mono">system_bot</span>
+          <span class="text-[9px] text-slate-500">14:26:01</span>
+        </div>
+        <div class="bg-[#6046ff]/5 p-2.5 rounded border border-[#6046ff]/20 text-slate-300 leading-relaxed shadow-[inset_0_0_8px_rgba(96,70,255,0.05)]">
+          Agent [Logic-Parser] restarted successfully.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="p-4 border-t border-[#252838]/50 bg-[#0d0f18]">
+    <div class="relative flex items-center">
+      <input type="text" class="w-full bg-[#1c1f2e] border-[#252838] rounded-lg pl-3 pr-10 py-2.5 text-xs text-slate-300 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono" placeholder="Type command or message...">
+      <button class="absolute right-2 text-[#6046ff] hover:text-[#725bff] transition-colors p-1 cursor-pointer">
+        <span class="material-symbols-outlined text-[18px]">send</span>
+      </button>
+    </div>
+  </div>
+</aside>
+
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

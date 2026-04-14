@@ -1,0 +1,75 @@
+/* ── Base ─────────────────────────────────────── */
+body {
+  font-family: 'Inter', sans-serif;
+  background: #0a0b12;
+  color: #e3e1ec;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* ── Scrollbar ───────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track  { background: #0d0e15; }
+::-webkit-scrollbar-thumb  { background: #252838; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #6046ff; }
+
+/* ── Dot grid canvas background ──────────────── */
+.dot-grid {
+  background-image: radial-gradient(circle, #252838 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ── Chat drawer slide ───────────────────────── */
+.chat-drawer {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.chat-drawer.closed {
+  transform: translateX(100%);
+}
+
+/* ── Event row (workspace log) ───────────────── */
+.event-row {
+  display: flex;
+  align-items: baseline;
+  padding: 3px 14px;
+  line-height: 1.7;
+  font-size: 11px;
+  font-family: 'Fira Code', monospace;
+  transition: background 0.1s;
+}
+.event-row:hover { background: rgba(28, 31, 46, 0.6); }
+
+.ev-time    { color: #474556; flex-shrink: 0; width: 72px; }
+.ev-session { color: #928ea2; flex-shrink: 0; width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-type    { flex-shrink: 0; width: 130px; white-space: nowrap; }
+.ev-detail  { color: #928ea2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+/* ── Event type colors ───────────────────────── */
+.t-session_start  { color: #34d399; }
+.t-session_end    { color: #f87171; }
+.t-thinking_start { color: #818cf8; }
+.t-thinking_end   { color: #6366f1; }
+.t-agent_start    { color: #fb923c; }
+.t-agent_done     { color: #fbbf24; }
+.t-tool_use       { color: #7dd3fc; }
+.t-unknown        { color: #64748b; }
+
+/* ── Tab active glow ─────────────────────────── */
+.tab-btn {
+  position: relative;
+  cursor: pointer;
+  background: none;
+}
+.tab-btn--active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #6046ff;
+  filter: blur(4px);
+  opacity: 0.5;
+}
