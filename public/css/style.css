@@ -70,12 +70,17 @@ body {
   height: auto;
   image-rendering: pixelated;
   animation: mascot-float 3s ease-in-out infinite;
+  display: block;
+  will-change: transform;
+  position: relative;
 }
 
 @keyframes mascot-float {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  25%      { transform: translateY(-8px) rotate(1deg); }
-  75%      { transform: translateY(4px) rotate(-1deg); }
+  0%   { transform: translateY(0) scale(1) rotate(0deg); }
+  25%  { transform: translateY(-6px) scale(1.02) rotate(0.8deg); }
+  50%  { transform: translateY(2px) scale(1.01) rotate(-0.5deg); }
+  75%  { transform: translateY(-4px) scale(1.02) rotate(0.6deg); }
+  100% { transform: translateY(0) scale(1) rotate(0deg); }
 }
 
 .mascot-label {
@@ -92,6 +97,8 @@ body {
   width: fit-content;
   margin-left: auto;
   margin-right: auto;
+  transform: translateY(0);
+  will-change: auto;
 }
 
 /* ── Tab active glow ─────────────────────────── */

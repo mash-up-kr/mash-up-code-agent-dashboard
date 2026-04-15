@@ -416,6 +416,11 @@ function syncMascots() {
       <img src="/img/mascot.png" alt="${esc(s.name || 'mascot')}" class="mascot-img" draggable="false">
       <div class="mascot-label">${esc(s.name || pid)}</div>`;
 
+    // Animate between two mascot images
+    const mascotImg = el.querySelector('.mascot-img');
+    const images = ['/img/mascot-default.png', '/img/mascot-move.png'];
+    const imgInterval = startImageAnimation(mascotImg, images, 600);
+
     // Random initial position
     const cw = canvas.clientWidth || 800;
     const ch = canvas.clientHeight || 600;
@@ -431,7 +436,7 @@ function syncMascots() {
     const interval = setInterval(() => wanderMascot(el), 4000 + Math.random() * 3000);
     setTimeout(() => wanderMascot(el), 1000 + Math.random() * 2000);
 
-    activeMascots.set(pid, { el, interval });
+    activeMascots.set(pid, { el, interval, imgInterval });
   }
 
   // Remove mascots for ended sessions
@@ -440,6 +445,7 @@ function syncMascots() {
       m.el.style.opacity = '0';
       m.el.style.transition = 'opacity 0.8s';
       clearInterval(m.interval);
+      clearInterval(m.imgInterval);
       setTimeout(() => m.el.remove(), 800);
       activeMascots.delete(pid);
     }
@@ -454,4 +460,16 @@ function wanderMascot(el) {
   const y = Math.random() * (ch - 160) + 20;
   el.style.left = x + 'px';
   el.style.top  = y + 'px';
+}
+
+/* ══════════════════════════════════════════════════
+   Image Animation
+   ══════════════════════════════════════════════════ */
+function startImageAnimation(element, images, interval = 600) {
+  let imageIndex = 0;
+  const imgInterval = setInterval(() => {
+    element.src = images[imageIndex];
+    imageIndex = (imageIndex + 1) % images.length;
+  }, interval);
+  return imgInterval;
 }
