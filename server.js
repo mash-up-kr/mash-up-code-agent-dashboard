@@ -178,5 +178,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`claude-agent-viz-simple  →  http://localhost:${PORT}`);
+  console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
 });
