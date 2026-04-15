@@ -1,5 +1,13 @@
 #!/bin/bash
 # Claude Code Hook Handler — sends events to the viz server
+# Usage: hook-handler.sh <event_type>
+#   PreToolUse        → pre_tool_use       (before permission check)
+#   PostToolUse       → tool_use           (after execution)
+#   PermissionRequest → permission_request (waiting for user approval)
+#   Stop              → stop               (Claude finished responding)
+#   PreCompact        → pre_compact        (before compaction)
+#   PostCompact       → post_compact       (after compaction)
+#   Others            → passed through as-is
 PORT="${AGENT_VIZ_PORT:-4321}"
 EVENT_TYPE="${1:-unknown}"
 

@@ -207,10 +207,85 @@ function appendEvent(e) {
   if (e.type === 'tool_use') toolCallCount++;
 
   // Track last tool per session (for mascot bubbles)
-  if (e.type === 'tool_use' && e.pid) {
+  if ((e.type === 'tool_use' || e.type === 'pre_tool_use') && e.pid) {
     sessionLastTool.set(e.pid, { toolName: e.toolName, toolDetail: e.toolDetail || '', ts: e.ts });
+    // Only clear permission pending on actual tool execution, not pre_tool_use
+    // (pre_tool_use fires before permission check; permission_request comes after)
+    if (e.type === 'tool_use') sessionPermPending.delete(e.pid);
     const m = activeMascots.get(e.pid);
     if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
+    // Track current in-progress task per session
+    if (e.toolName === 'TaskCreate' && e.toolDetail) {
+      if (!sessionTaskList.has(e.pid)) sessionTaskList.set(e.pid, []);
+      sessionTaskList.get(e.pid).push({ subject: e.toolDetail, status: 'pending' });
+      updateMascotTaskLabel(e.pid);
+    }
+    if (e.toolName === 'TaskUpdate' && e.toolDetail) {
+      const list = sessionTaskList.get(e.pid) || [];
+      // Extract task number from "#N → status"
+      const match = e.toolDetail.match(/#(\d+)\s*→\s*(\S+)/);
+      const newStatus = match ? match[2] : '';
+      // Find the task to update — try index-based within session list
+      if (newStatus === 'in_progress') {
+        // Find the oldest pending task and mark it in_progress (FIFO)
+        const task = list.find(t => t.status !== 'completed' && t.status !== 'in_progress');
+        if (task) task.status = 'in_progress';
+        // Set current task label to in-progress task
+        const activeTask = list.find(t => t.status === 'in_progress');
+        if (activeTask) sessionCurrentTask.set(e.pid, { subject: activeTask.subject });
+        updateMascotTaskLabel(e.pid);
+      }
+      if (newStatus === 'completed') {
+        // Mark the oldest in_progress or pending task as completed
+        const task = list.find(t => t.status === 'in_progress') || list.find(t => t.status !== 'completed');
+        if (task) task.status = 'completed';
+        // Update current task to next in_progress, or clear
+        const nextActive = list.find(t => t.status === 'in_progress');
+        if (nextActive) sessionCurrentTask.set(e.pid, { subject: nextActive.subject });
+        else sessionCurrentTask.delete(e.pid);
+        updateMascotTaskLabel(e.pid);
+      }
+    }
+    // Trigger excited mood on task completion
+    if (e.toolName === 'TaskUpdate' && e.toolDetail && e.toolDetail.includes('completed')) {
+      triggerExcitedMood(e.pid);
+    }
+  }
+  if (e.type === 'permission_request' && e.pid) {
+    sessionPermPending.set(e.pid, { toolName: e.toolName, toolDetail: e.toolDetail || '', ts: e.ts || Date.now() });
+    const m = activeMascots.get(e.pid);
+    if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
+  }
+  // Note: do NOT clear sessionPermPending on thinking_start/thinking_end.
+  // Permission pending is only resolved when tool_use (PostToolUse) fires,
+  // meaning the user actually approved and the tool executed.
+  // Track compaction state
+  if (e.type === 'pre_compact' && e.pid) {
+    sessionCompacting.add(e.pid);
+    const m = activeMascots.get(e.pid);
+    if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
+  }
+  if (e.type === 'post_compact' && e.pid) {
+    sessionCompacting.delete(e.pid);
+    const m = activeMascots.get(e.pid);
+    if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
+  }
+  // Stop — Claude finished responding: clear all priority states and show idle reaction
+  if (e.type === 'stop' && e.pid) {
+    sessionPermPending.delete(e.pid);
+    sessionCompacting.delete(e.pid);
+    const m = activeMascots.get(e.pid);
+    if (m) {
+      const bubble = m.el.querySelector('.mascot-bubble');
+      if (bubble) {
+        bubble.style.borderColor = ''; // reset priority border
+        const stopQuotes = ['끝! 다음은 뭐 할까?', '응답 완료~', '다 했어!', '자 이제 너 차례야~', '완료! 확인해봐~'];
+        bubble.textContent = stopQuotes[Math.floor(Math.random() * stopQuotes.length)];
+        bubble.classList.add('visible');
+        m.idleBubbleActive = true;
+        setTimeout(() => { if (!hasPriorityBubble(e.pid)) { m.idleBubbleActive = false; bubble.classList.remove('visible'); } }, 8000);
+      }
+    }
   }
 
   // Track for dashboard
@@ -424,7 +499,34 @@ function trackEventType(ev) {
    ══════════════════════════════════════════════════ */
 const toastContainer = document.getElementById('toast-container');
 
+/* ── Browser Notification API ─────────────────── */
+let browserNotiPermission = Notification?.permission || 'default';
+
+function requestBrowserNotification() {
+  if (!('Notification' in window)) return;
+  if (browserNotiPermission === 'default') {
+    Notification.requestPermission().then(p => { browserNotiPermission = p; });
+  }
+}
+// Auto-request on first user gesture
+document.addEventListener('click', () => requestBrowserNotification(), { once: true });
+
+function sendBrowserNotification(title, message) {
+  if (browserNotiPermission !== 'granted' || !document.hidden) return;
+  try {
+    const n = new Notification(title, {
+      body: message,
+      icon: '/img/mascot-default.png',
+      tag: 'claude-viz-' + Date.now(),
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 8000);
+  } catch (_) {}
+}
+
 function showToast(title, message) {
+  // Also send browser notification when tab is hidden
+  sendBrowserNotification(title, message);
   if (!toastContainer) return;
   const toast = document.createElement('div');
   toast.className = 'pointer-events-auto bg-[#13151f] border border-[#6046ff]/30 rounded-lg p-4 shadow-[0_8px_32px_rgba(96,70,255,0.15)] backdrop-blur-xl max-w-sm animate-slide-in';
@@ -495,9 +597,22 @@ function showGoalPopup(projectCwd, projectName, currentGoalMin) {
   popup.className = 'goal-popup fixed inset-0 z-[100] flex items-center justify-center';
   popup.style.background = 'rgba(0,0,0,0.5)';
   popup.innerHTML = `
-    <div class="bg-[#0d0f18] border border-[#252838] rounded-lg p-4 w-[260px] shadow-2xl" onclick="event.stopPropagation()">
+    <div class="bg-[#0d0f18] border border-[#252838] rounded-lg p-4 w-[280px] shadow-2xl" onclick="event.stopPropagation()">
       <div class="text-[9px] text-slate-600 uppercase tracking-wider mb-3">작업 타이머 설정</div>
       <div class="text-[10px] text-slate-400 mb-3">${esc(projectName)}</div>
+
+      <!-- Pomodoro quick-start -->
+      <div class="mb-3 pb-3 border-b border-[#252838]">
+        <div class="text-[9px] text-slate-500 mb-2">포모도로</div>
+        <div class="grid grid-cols-3 gap-1.5">
+          <button class="pomo-btn py-1.5 rounded text-[10px] text-[#6046ff] bg-[#6046ff]/10 hover:bg-[#6046ff]/20 cursor-pointer transition-colors font-mono" data-work="25" data-rest="5">25/5</button>
+          <button class="pomo-btn py-1.5 rounded text-[10px] text-[#6046ff] bg-[#6046ff]/10 hover:bg-[#6046ff]/20 cursor-pointer transition-colors font-mono" data-work="50" data-rest="10">50/10</button>
+          <button class="pomo-btn py-1.5 rounded text-[10px] text-[#6046ff] bg-[#6046ff]/10 hover:bg-[#6046ff]/20 cursor-pointer transition-colors font-mono" data-work="90" data-rest="15">90/15</button>
+        </div>
+      </div>
+
+      <!-- Custom timer -->
+      <div class="text-[9px] text-slate-500 mb-2">커스텀</div>
       <div class="grid grid-cols-2 gap-2 mb-4">
         <div>
           <div class="text-[9px] text-slate-500 mb-1">시간</div>
@@ -548,6 +663,20 @@ function showGoalPopup(projectCwd, projectName, currentGoalMin) {
     if (cachedProjects) renderProjectPanel(cachedProjects);
   });
 
+  // Pomodoro quick-start buttons
+  popup.querySelectorAll('.pomo-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const workMin = parseInt(btn.dataset.work);
+      const restMin = parseInt(btn.dataset.rest);
+      const goals = loadProjectGoals();
+      goals[projectCwd] = { goalMin: workMin, setAt: Date.now(), pomodoro: { workMin, restMin, cycle: 1 } };
+      saveProjectGoals(goals);
+      goalNotified.delete(projectCwd);
+      popup.remove();
+      if (cachedProjects) renderProjectPanel(cachedProjects);
+    });
+  });
+
   // Focus on hours input
   setTimeout(() => popup.querySelector('#goal-hours')?.focus(), 100);
 }
@@ -589,11 +718,25 @@ function buildGoalTimerHtml(projectCwd, projectName) {
   const isComplete = elapsed >= goalMs;
   const remaining = goalMs - elapsed;
 
-  const goalLabel = `${Math.floor(goal.goalMin / 60)}시간` + (goal.goalMin % 60 ? ` ${goal.goalMin % 60}분` : '');
+  const isPomo = !!goal.pomodoro;
+  const isResting = !!goal.isResting;
+  const pomoCycle = goal.pomodoro?.cycle || 1;
+  const accentColor = isResting ? '#22c55e' : '#6046ff';
+  const phaseLabel = isResting ? '휴식 중' : '작업 중';
+  const phaseIcon = isResting ? 'coffee' : 'timer';
+
+  const goalLabel = goal.goalMin >= 60
+    ? `${Math.floor(goal.goalMin / 60)}시간` + (goal.goalMin % 60 ? ` ${goal.goalMin % 60}분` : '')
+    : `${goal.goalMin}분`;
   return `
-    <div class="mb-3 goal-timer-live" data-goal-ms="${goalMs}" data-set-at="${setAt}" data-cwd="${esc(projectCwd)}" data-name="${esc(projectName)}">
+    <div class="mb-3 goal-timer-live" data-goal-ms="${goalMs}" data-set-at="${setAt}" data-cwd="${esc(projectCwd)}" data-name="${esc(projectName)}" data-pomo="${isPomo ? '1' : ''}" data-resting="${isResting ? '1' : ''}">
       <div class="flex items-center justify-between mb-1.5">
-        <div class="text-[9px] text-slate-600 uppercase tracking-wider">작업 타이머</div>
+        <div class="flex items-center gap-1.5">
+          <div class="text-[9px] text-slate-600 uppercase tracking-wider">${isPomo ? '포모도로' : '작업 타이머'}</div>
+          ${isPomo ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full gt-phase-badge" style="background:${accentColor}20;color:${accentColor}">
+            <span class="material-symbols-outlined text-[10px] align-middle">${phaseIcon}</span> ${phaseLabel} · ${pomoCycle}회차
+          </span>` : ''}
+        </div>
         <div class="flex items-center gap-2">
           <button onclick="window._stopTimer('${esc(projectCwd)}'); event.stopPropagation();"
             class="text-[9px] text-red-400 hover:text-red-300 cursor-pointer transition-colors">중지</button>
@@ -603,7 +746,7 @@ function buildGoalTimerHtml(projectCwd, projectName) {
       </div>
       <div class="grid grid-cols-3 gap-1.5 mb-1.5">
         <div class="bg-[#1c1f2e] rounded px-2 py-1.5 text-center">
-          <div class="text-[9px] text-slate-500">목표</div>
+          <div class="text-[9px] text-slate-500">${isPomo ? phaseLabel : '목표'}</div>
           <div class="text-xs font-bold text-white font-mono">${goalLabel}</div>
         </div>
         <div class="bg-[#1c1f2e] rounded px-2 py-1.5 text-center">
@@ -617,9 +760,9 @@ function buildGoalTimerHtml(projectCwd, projectName) {
       </div>
       <div class="flex items-center gap-2">
         <div class="flex-1 h-1.5 bg-[#1c1f2e] rounded-full overflow-hidden">
-          <div class="h-full rounded-full transition-all duration-1000 gt-bar" style="width:${pct}%"></div>
+          <div class="h-full rounded-full transition-all duration-1000 gt-bar" style="width:${pct}%;background:${accentColor}"></div>
         </div>
-        <span class="text-[10px] font-bold font-mono gt-pct">${Math.floor(pct)}%</span>
+        <span class="text-[10px] font-bold font-mono gt-pct" style="color:${accentColor}">${Math.floor(pct)}%</span>
       </div>
     </div>`;
 }
@@ -648,19 +791,50 @@ function tickTimers() {
       remainLbl.textContent = isComplete ? '초과' : '남은 시간';
       remainLbl.className = 'text-[9px] gt-remain-label ' + (isComplete ? 'text-emerald-500' : 'text-slate-500');
     }
+    const isResting = el.dataset.resting === '1';
+    const accent = isResting ? '#22c55e' : '#6046ff';
+
     if (barEl) {
       barEl.style.width = pct + '%';
-      barEl.className = 'h-full rounded-full transition-all duration-1000 gt-bar ' + (isComplete ? 'bg-emerald-500' : 'bg-[#6046ff]');
+      barEl.style.background = isComplete ? '#22c55e' : accent;
+      barEl.className = 'h-full rounded-full transition-all duration-1000 gt-bar';
     }
-    if (pctEl) pctEl.textContent = Math.floor(pct) + '%';
-    if (elapsedEl) elapsedEl.className = 'text-xs font-bold font-mono gt-elapsed ' + (isComplete ? 'text-emerald-400' : 'text-[#6046ff]');
+    if (pctEl) { pctEl.textContent = Math.floor(pct) + '%'; pctEl.style.color = isComplete ? '#22c55e' : accent; }
+    if (elapsedEl) elapsedEl.style.color = isComplete ? '#34d399' : accent;
     if (remainEl) remainEl.className = 'text-xs font-bold font-mono gt-remain ' + (isComplete ? 'text-emerald-400' : 'text-white');
-    if (pctEl) pctEl.className = 'text-[10px] font-bold font-mono gt-pct ' + (isComplete ? 'text-emerald-400' : 'text-[#6046ff]');
+    elapsedEl?.classList?.add('text-xs', 'font-bold', 'font-mono', 'gt-elapsed');
+    pctEl?.classList?.add('text-[10px]', 'font-bold', 'font-mono', 'gt-pct');
 
-    // Goal notification
+    // Goal / Pomodoro notification
     if (isComplete && !goalNotified.has(el.dataset.cwd)) {
       goalNotified.add(el.dataset.cwd);
-      showToast('타이머 완료!', `${el.dataset.name} 작업 타이머가 종료되었어요!`);
+      const cwd = el.dataset.cwd;
+      const goals = loadProjectGoals();
+      const goal = goals[cwd];
+      if (goal?.pomodoro) {
+        const pomo = goal.pomodoro;
+        const isWorkPhase = !goal.isResting;
+        if (isWorkPhase) {
+          showToast('휴식 시간!', `${el.dataset.name} — ${pomo.workMin}분 작업 완료! ${pomo.restMin}분 쉬세요`);
+          // Switch to rest phase
+          goal.goalMin = pomo.restMin;
+          goal.setAt = Date.now();
+          goal.isResting = true;
+          saveProjectGoals(goals);
+          setTimeout(() => { goalNotified.delete(cwd); if (cachedProjects) renderProjectPanel(cachedProjects); }, 500);
+        } else {
+          pomo.cycle = (pomo.cycle || 1) + 1;
+          showToast('작업 시작!', `${el.dataset.name} — ${pomo.cycle}번째 포모도로 시작!`);
+          // Switch back to work phase
+          goal.goalMin = pomo.workMin;
+          goal.setAt = Date.now();
+          goal.isResting = false;
+          saveProjectGoals(goals);
+          setTimeout(() => { goalNotified.delete(cwd); if (cachedProjects) renderProjectPanel(cachedProjects); }, 500);
+        }
+      } else {
+        showToast('타이머 완료!', `${el.dataset.name} 작업 타이머가 종료되었어요!`);
+      }
     }
   }
 }
@@ -742,10 +916,15 @@ function renderProjectPanel(projects) {
     }).join('');
 
     // ── Tasks ──
-    const tasks = (proj.tasks || []).slice(0, 10);
-    const completedTasks = tasks.filter(t => t.status === 'completed').length;
-    const totalTasks = tasks.length;
-    const taskRows = tasks.map(t => {
+    const allTasks = proj.tasks || [];
+    const archivedCount = proj.archivedTaskCount || 0;
+    const activeTasks = allTasks.filter(t => t.status === 'in_progress');
+    const pendingTasks = allTasks.filter(t => t.status === 'pending');
+    const completedTasks = allTasks.filter(t => t.status === 'completed');
+    const totalTasks = allTasks.length + archivedCount;
+    const doneCount = completedTasks.length + archivedCount;
+
+    function taskRow(t) {
       const icon = t.status === 'completed' ? 'check_circle' : t.status === 'in_progress' ? 'pending' : 'radio_button_unchecked';
       const color = t.status === 'completed' ? 'text-emerald-400' : t.status === 'in_progress' ? 'text-amber-400' : 'text-slate-500';
       const textColor = t.status === 'completed' ? 'text-slate-500 line-through' : 'text-slate-300';
@@ -754,7 +933,33 @@ function renderProjectPanel(projects) {
           <span class="material-symbols-outlined text-[12px] ${color}">${icon}</span>
           <span class="${textColor} truncate flex-1">${esc(t.subject)}</span>
         </div>`;
-    }).join('');
+    }
+
+    const activeRows = activeTasks.map(taskRow).join('');
+    const pendingRows = pendingTasks.map(taskRow).join('');
+    const completedRows = completedTasks.map(taskRow).join('');
+
+    // Progress bar
+    const progressPct = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
+    const progressBarHtml = totalTasks > 0 ? `
+      <div class="flex items-center gap-2 mb-1.5">
+        <div class="flex-1 h-1.5 bg-[#1c1f2e] rounded-full overflow-hidden">
+          <div class="h-full bg-emerald-500 rounded-full transition-all" style="width:${progressPct}%"></div>
+        </div>
+        <span class="text-[9px] font-mono ${progressPct === 100 ? 'text-emerald-400' : 'text-slate-400'}">${doneCount}/${totalTasks}</span>
+      </div>` : '';
+
+    // Collapsible completed section
+    const completedSection = completedTasks.length > 0 ? `
+      <div class="mt-1">
+        <button onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('.collapse-icon').classList.toggle('rotate-90')"
+          class="flex items-center gap-1 text-[9px] text-slate-500 hover:text-slate-400 cursor-pointer transition-colors w-full">
+          <span class="material-symbols-outlined text-[10px] collapse-icon rotate-90 transition-transform">chevron_right</span>
+          완료 (${completedTasks.length}${archivedCount ? ` +${archivedCount} 아카이브` : ''})
+        </button>
+        <div class="hidden mt-0.5">${completedRows}</div>
+      </div>` : (archivedCount > 0 ? `
+      <div class="text-[9px] text-slate-600 mt-1">아카이브된 태스크 ${archivedCount}개</div>` : '');
 
     // ── Recent sessions ──
     const sessionRows = (proj.sessions || []).slice(0, 5).map(s => {
@@ -839,13 +1044,13 @@ function renderProjectPanel(projects) {
         </div>` : ''}
 
         <!-- Tasks -->
-        ${taskRows ? `
+        ${allTasks.length > 0 || archivedCount > 0 ? `
         <div class="mb-2">
-          <div class="flex items-center justify-between mb-1">
-            <div class="text-[9px] text-slate-600 uppercase tracking-wider">작업 목록</div>
-            ${totalTasks > 0 ? `<span class="text-[9px] text-slate-500 font-mono">${completedTasks}/${totalTasks}</span>` : ''}
-          </div>
-          ${taskRows}
+          <div class="text-[9px] text-slate-600 uppercase tracking-wider mb-1">작업 목록</div>
+          ${progressBarHtml}
+          ${activeRows}
+          ${pendingRows}
+          ${completedSection}
         </div>` : ''}
 
         <!-- Daily sparkline -->
@@ -1032,124 +1237,12 @@ loadBashCommands();
 setInterval(loadBashCommands, 30000);
 
 /* ══════════════════════════════════════════════════
-   Project Comparison Tab
-   ══════════════════════════════════════════════════ */
-function renderComparison(projects) {
-  const body = document.getElementById('compare-body');
-  if (!body || !projects || projects.length === 0) return;
-
-  const maxEvents = Math.max(1, ...projects.map(p => p.totalEvents));
-  const maxDuration = Math.max(1, ...projects.map(p => p.totalDuration));
-  const maxSessions = Math.max(1, ...projects.map(p => p.totalSessions));
-
-  // Comparison table
-  const tableRows = projects.map(proj => {
-    const evPct = (proj.totalEvents / maxEvents) * 100;
-    const durPct = (proj.totalDuration / maxDuration) * 100;
-    const sesPct = (proj.totalSessions / maxSessions) * 100;
-    const topTools = Object.entries(proj.toolCounts || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n).join(', ');
-    return `
-      <tr class="hover:bg-[#1c1f2e] transition-colors">
-        <td class="px-5 py-3">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-[14px] text-[#6046ff]">folder</span>
-            <span class="text-xs font-bold text-slate-200">${esc(proj.name)}</span>
-          </div>
-        </td>
-        <td class="px-5 py-3">
-          <div class="flex items-center gap-2">
-            <div class="w-20 h-1.5 bg-[#1c1f2e] rounded-full overflow-hidden">
-              <div class="h-full bg-[#6046ff] rounded-full" style="width:${sesPct}%"></div>
-            </div>
-            <span class="text-xs font-mono text-slate-400">${proj.totalSessions}</span>
-          </div>
-        </td>
-        <td class="px-5 py-3">
-          <div class="flex items-center gap-2">
-            <div class="w-20 h-1.5 bg-[#1c1f2e] rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500 rounded-full" style="width:${durPct}%"></div>
-            </div>
-            <span class="text-xs font-mono text-slate-400">${formatDuration(proj.totalDuration)}</span>
-          </div>
-        </td>
-        <td class="px-5 py-3">
-          <div class="flex items-center gap-2">
-            <div class="w-20 h-1.5 bg-[#1c1f2e] rounded-full overflow-hidden">
-              <div class="h-full bg-amber-500 rounded-full" style="width:${evPct}%"></div>
-            </div>
-            <span class="text-xs font-mono text-slate-400">${proj.totalEvents.toLocaleString()}</span>
-          </div>
-        </td>
-        <td class="px-5 py-3 text-xs text-slate-500 font-mono">${topTools || '-'}</td>
-        <td class="px-5 py-3 text-xs text-slate-500">${formatLastActivity(proj.lastActivityTs)}</td>
-      </tr>`;
-  }).join('');
-
-  body.innerHTML = `
-    <div class="bg-[#13151f] border border-[#252838] rounded-xl overflow-hidden mb-8">
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead class="bg-[#0d0e15] text-slate-500 text-[11px] font-mono uppercase">
-            <tr>
-              <th class="px-5 py-3 font-medium">프로젝트</th>
-              <th class="px-5 py-3 font-medium">세션</th>
-              <th class="px-5 py-3 font-medium">사용 시간</th>
-              <th class="px-5 py-3 font-medium">이벤트</th>
-              <th class="px-5 py-3 font-medium">주요 도구</th>
-              <th class="px-5 py-3 font-medium">마지막 활동</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-[#252838]/30 text-slate-300">${tableRows}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Stacked bar comparison -->
-    <div class="bg-[#13151f] border border-[#252838] rounded-xl p-6">
-      <h3 class="text-white font-headline font-semibold text-sm flex items-center gap-2 mb-4">
-        <span class="w-1 h-4 bg-[#6046ff] rounded-full"></span>
-        도구 사용 비교
-      </h3>
-      <div class="space-y-3">${projects.map(proj => {
-        const totalTools = Object.values(proj.toolCounts || {}).reduce((a, b) => a + b, 0) || 1;
-        const toolColors = { Bash: '#f97316', Read: '#3b82f6', Edit: '#6046ff', Write: '#8b5cf6', Grep: '#06b6d4', Glob: '#14b8a6', Agent: '#f59e0b' };
-        const segments = Object.entries(proj.toolCounts || {}).sort((a, b) => b[1] - a[1]).map(([name, count]) => {
-          const pct = (count / totalTools) * 100;
-          const color = toolColors[name] || '#64748b';
-          return `<div class="h-full" style="width:${pct}%;background:${color}" title="${name}: ${count} (${Math.round(pct)}%)"></div>`;
-        }).join('');
-        return `
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-xs text-slate-300">${esc(proj.name)}</span>
-              <span class="text-[10px] text-slate-500 font-mono">${totalTools} calls</span>
-            </div>
-            <div class="flex h-3 rounded-full overflow-hidden gap-px">${segments}</div>
-          </div>`;
-      }).join('')}</div>
-      <div class="flex flex-wrap gap-3 mt-4 pt-3 border-t border-[#252838]/50">
-        ${['Bash:#f97316', 'Read:#3b82f6', 'Edit:#6046ff', 'Write:#8b5cf6', 'Grep:#06b6d4', 'Glob:#14b8a6', 'Agent:#f59e0b'].map(s => {
-          const [n, c] = s.split(':');
-          return `<div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-full" style="background:${c}"></div><span class="text-[10px] text-slate-500">${n}</span></div>`;
-        }).join('')}
-      </div>
-    </div>`;
-}
-
-function loadComparison() {
-  fetch('/api/projects')
-    .then(r => r.json())
-    .then(renderComparison)
-    .catch(() => {});
-}
-
-/* ══════════════════════════════════════════════════
    Tab data loading on switch
    ══════════════════════════════════════════════════ */
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
-    if (tab === 'compare') loadComparison();
+    void tab; // placeholder for future tab-specific loading
   });
 });
 
@@ -1202,10 +1295,153 @@ document.addEventListener('fullscreenchange', () => {
    ══════════════════════════════════════════════════ */
 const mascotContainer = document.getElementById('mascot-container');
 const canvas = document.getElementById('view-workspace');
-const activeMascots = new Map(); // pid -> { el, interval, imgInterval, lastStatus, lastTool }
+const activeMascots = new Map(); // pid -> { el, interval, imgInterval, lastStatus, lastTool, mood, ... }
 
 // Per-session last tool event tracking
 const sessionLastTool = new Map(); // pid -> { toolName, toolDetail, ts }
+const sessionPermPending = new Map(); // pid -> { toolName, toolDetail, ts }
+const sessionCurrentTask = new Map(); // pid -> { subject } — currently in-progress task
+const sessionTaskList = new Map(); // pid -> [{subject, status}] — all tasks for this session
+const sessionCompacting = new Set(); // pid set — sessions currently compacting
+
+/** Returns true if this session has a high-priority bubble (permission/compaction) that must not be overridden. */
+function hasPriorityBubble(pid) {
+  return sessionPermPending.has(pid) || sessionCompacting.has(pid);
+}
+
+/* ── Emotion / Mood System ───────────────────── */
+// Mood: 'happy' | 'normal' | 'tired' | 'excited'
+// Based on: session duration, task completions, idle time
+const moodQuotes = {
+  tired:   ['피곤해...잠깐 쉬자', '눈이 뻑뻑해..', '으으 얼마나 더..?', '커피 한 잔만...', '좀 쉬어도 돼?', '졸리다 zzZ'],
+  excited: ['우와 해냈다!', '완료! 기분 최고~', '역시 나란 매숑이!', '한 건 했다!', '이 맛에 코딩하지!', 'LGTM~!'],
+  happy:   ['기분 좋은 날~', '오늘 컨디션 최고!', '코딩이 술술 풀려~', '오예~ 순조롭다', '이 흐름 계속 가자!'],
+};
+
+function getMascotMood(pid) {
+  const s = sessions.get(pid);
+  if (!s) return 'normal';
+  const elapsed = Date.now() - (s.startedAt || Date.now());
+  const hours = elapsed / (1000 * 60 * 60);
+  if (hours > 3) return 'tired';
+  if (hours > 1.5) return 'tired';
+  return 'normal';
+}
+
+function getMoodEmoji(mood) {
+  return { tired: '😴', excited: '🎉', happy: '😊', normal: '' }[mood] || '';
+}
+
+function getMoodFilter(mood) {
+  switch (mood) {
+    case 'tired':   return 'saturate(0.6) brightness(0.85)';
+    case 'excited': return 'saturate(1.4) brightness(1.15)';
+    case 'happy':   return 'saturate(1.2) brightness(1.05)';
+    default:        return '';
+  }
+}
+
+// Trigger excited mood on task completion
+function triggerExcitedMood(pid) {
+  const m = activeMascots.get(pid);
+  if (!m) return;
+  m.mood = 'excited';
+  m.moodUntil = Date.now() + 15000;
+  applyMood(m);
+  if (hasPriorityBubble(pid)) return; // don't override permission/compaction bubble
+  const bubble = m.el.querySelector('.mascot-bubble');
+  if (bubble) {
+    const q = moodQuotes.excited[Math.floor(Math.random() * moodQuotes.excited.length)];
+    bubble.textContent = getMoodEmoji('excited') + ' ' + q;
+    bubble.classList.add('visible');
+    m.idleBubbleActive = true;
+    setTimeout(() => { if (!hasPriorityBubble(pid)) { m.idleBubbleActive = false; bubble.classList.remove('visible'); } }, 10000);
+  }
+}
+
+function applyMood(m) {
+  const img = m.el.querySelector('.mascot-img');
+  if (!img) return;
+  const mood = m.mood || 'normal';
+  const filter = getMoodFilter(mood);
+  img.style.filter = filter || '';
+  // Emoji overlay
+  let emojiEl = m.el.querySelector('.mascot-mood-emoji');
+  const emoji = getMoodEmoji(mood);
+  if (emoji) {
+    if (!emojiEl) {
+      emojiEl = document.createElement('span');
+      emojiEl.className = 'mascot-mood-emoji';
+      emojiEl.style.cssText = 'position:absolute;top:-2px;right:-2px;font-size:16px;z-index:7;pointer-events:none;';
+      m.el.appendChild(emojiEl);
+    }
+    emojiEl.textContent = emoji;
+  } else if (emojiEl) {
+    emojiEl.remove();
+  }
+}
+
+/* ── Mascot Interaction System ───────────────── */
+const interactionQuotes = [
+  ['오 안녕!', '반가워~!'],
+  ['뭐 하고 있어?', '코딩 중~'],
+  ['버그 찾았어?', '아직...ㅠ'],
+  ['같이 하자!', '좋아!'],
+  ['힘내!', '고마워~'],
+  ['커피 마실래?', '좋지!'],
+  ['PR 올렸어?', '지금 올릴 거야!'],
+  ['점심 같이 먹자', '뭐 먹을까?'],
+];
+
+function checkMascotInteractions() {
+  const mascots = [...activeMascots.values()];
+  if (mascots.length < 2) return;
+
+  for (let i = 0; i < mascots.length; i++) {
+    for (let j = i + 1; j < mascots.length; j++) {
+      const a = mascots[i], b = mascots[j];
+      // Skip if either is in a non-idle interaction state
+      if (a.interactingUntil > Date.now() || b.interactingUntil > Date.now()) continue;
+
+      const ax = parseFloat(a.el.style.left) || 0;
+      const ay = parseFloat(a.el.style.top) || 0;
+      const bx = parseFloat(b.el.style.left) || 0;
+      const by = parseFloat(b.el.style.top) || 0;
+      const dist = Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
+
+      if (dist < 150) { // Close enough to interact
+        // Skip if either has a priority bubble
+        if (hasPriorityBubble(a.pid) || hasPriorityBubble(b.pid)) continue;
+
+        const pair = interactionQuotes[Math.floor(Math.random() * interactionQuotes.length)];
+        const now = Date.now();
+        a.interactingUntil = now + 12000;
+        b.interactingUntil = now + 12000;
+
+        const bubbleA = a.el.querySelector('.mascot-bubble');
+        const bubbleB = b.el.querySelector('.mascot-bubble');
+        if (bubbleA && !a.idleBubbleActive) {
+          bubbleA.textContent = pair[0];
+          bubbleA.classList.add('visible');
+          a.idleBubbleActive = true;
+          setTimeout(() => { if (!hasPriorityBubble(a.pid)) { a.idleBubbleActive = false; bubbleA.classList.remove('visible'); } }, 8000);
+        }
+        if (bubbleB && !b.idleBubbleActive) {
+          setTimeout(() => {
+            if (hasPriorityBubble(b.pid)) return;
+            bubbleB.textContent = pair[1];
+            bubbleB.classList.add('visible');
+            b.idleBubbleActive = true;
+            setTimeout(() => { if (!hasPriorityBubble(b.pid)) { b.idleBubbleActive = false; bubbleB.classList.remove('visible'); } }, 8000);
+          }, 1500);
+        }
+      }
+    }
+  }
+}
+
+// Check interactions every 5 seconds
+setInterval(checkMascotInteractions, 5000);
 
 const idleQuotes = [
   '코드 냄새가 나는데...?',
@@ -1273,7 +1509,36 @@ function updateBubble(mascotData, status) {
   if (!bubble) return;
 
   const pid = mascotData.pid;
+  const perm = sessionPermPending.get(pid);
   const lastTool = sessionLastTool.get(pid);
+
+  // Permission request — highest priority, stays until resolved
+  if (perm) {
+    const toolLabel = perm.toolName || '도구';
+    bubble.innerHTML = `<span class="animate-pulse" style="color:#fb923c">
+      <span class="material-symbols-outlined text-[10px] align-middle">front_hand</span>
+      승인 대기 중! (${esc(toolLabel)})
+    </span>`;
+    bubble.classList.add('visible');
+    bubble.style.borderColor = 'rgba(251,146,60,0.5)';
+    mascotData.idleBubbleActive = false;
+    return;
+  }
+
+  // Compaction — high priority indicator
+  if (sessionCompacting.has(pid)) {
+    bubble.innerHTML = `<span class="animate-pulse" style="color:#38bdf8">
+      <span class="material-symbols-outlined text-[10px] align-middle">compress</span>
+      컴팩션 중... 기억 정리하는 중!
+    </span>`;
+    bubble.classList.add('visible');
+    bubble.style.borderColor = 'rgba(56,189,248,0.5)';
+    mascotData.idleBubbleActive = false;
+    return;
+  }
+
+  // Reset border color
+  bubble.style.borderColor = '';
 
   if (status === 'thinking') {
     bubble.innerHTML = '<span class="animate-pulse">thinking...</span>';
@@ -1291,6 +1556,24 @@ function updateBubble(mascotData, status) {
     // Keep showing idle quote (managed by timer)
   } else {
     bubble.classList.remove('visible');
+  }
+}
+
+function updateMascotTaskLabel(pid) {
+  const m = activeMascots.get(pid);
+  if (!m) return;
+  let taskEl = m.el.querySelector('.mascot-task-label');
+  const task = sessionCurrentTask.get(pid);
+  if (task) {
+    if (!taskEl) {
+      taskEl = document.createElement('div');
+      taskEl.className = 'mascot-task-label';
+      taskEl.style.cssText = 'position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);white-space:nowrap;background:rgba(96,70,255,0.15);border:1px solid rgba(96,70,255,0.3);color:#a78bfa;font-size:8px;padding:1px 6px;border-radius:8px;pointer-events:none;z-index:6;max-width:140px;overflow:hidden;text-overflow:ellipsis;';
+      m.el.appendChild(taskEl);
+    }
+    taskEl.textContent = task.subject.length > 20 ? task.subject.slice(0, 20) + '…' : task.subject;
+  } else if (taskEl) {
+    taskEl.remove();
   }
 }
 
@@ -1382,37 +1665,50 @@ function handleMascotClick(mascotData, pid, el, e) {
     }, 500);
   }
 
-  // Show a click quote
-  const bubble = el.querySelector('.mascot-bubble');
-  if (bubble) {
-    const quote = clickQuotes[Math.floor(Math.random() * clickQuotes.length)];
-    bubble.textContent = quote;
-    bubble.classList.add('visible');
-    mascotData.idleBubbleActive = true;
-    clearTimeout(mascotData.clickBubbleTimeout);
-    mascotData.clickBubbleTimeout = setTimeout(() => {
-      mascotData.idleBubbleActive = false;
-      bubble.classList.remove('visible');
-    }, 10000);
+  // Show a click quote (but not if priority bubble is active)
+  if (!hasPriorityBubble(pid)) {
+    const bubble = el.querySelector('.mascot-bubble');
+    if (bubble) {
+      const quote = clickQuotes[Math.floor(Math.random() * clickQuotes.length)];
+      bubble.textContent = quote;
+      bubble.classList.add('visible');
+      mascotData.idleBubbleActive = true;
+      clearTimeout(mascotData.clickBubbleTimeout);
+      mascotData.clickBubbleTimeout = setTimeout(() => {
+        if (!hasPriorityBubble(pid)) { mascotData.idleBubbleActive = false; bubble.classList.remove('visible'); }
+      }, 10000);
+    }
   }
 }
 
 function showRandomQuote(mascotData) {
+  if (hasPriorityBubble(mascotData.pid)) return; // never override permission/compaction
   const s = sessions.get(mascotData.pid);
   if (!s || s.status === 'thinking' || s.status === 'running') return;
   const lastTool = sessionLastTool.get(mascotData.pid);
   if (lastTool && Date.now() - lastTool.ts < 5000) return;
+  if (mascotData.interactingUntil > Date.now()) return;
 
   const bubble = mascotData.el.querySelector('.mascot-bubble');
   if (!bubble) return;
 
-  const quote = idleQuotes[Math.floor(Math.random() * idleQuotes.length)];
+  // Update mood
+  const mood = (mascotData.moodUntil && mascotData.moodUntil > Date.now()) ? mascotData.mood : getMascotMood(mascotData.pid);
+  if (mood !== mascotData.mood) { mascotData.mood = mood; applyMood(mascotData); }
+
+  // Pick quotes based on mood
+  let pool = idleQuotes;
+  if (mood === 'tired' && Math.random() < 0.5) pool = moodQuotes.tired;
+  else if (mood === 'happy' && Math.random() < 0.3) pool = moodQuotes.happy;
+  const emoji = getMoodEmoji(mood);
+  const quote = (emoji ? emoji + ' ' : '') + pool[Math.floor(Math.random() * pool.length)];
   bubble.textContent = quote;
   bubble.classList.add('visible');
   mascotData.idleBubbleActive = true;
 
-  // Hide after a few seconds
+  // Hide after a few seconds (but keep priority bubble intact)
   setTimeout(() => {
+    if (hasPriorityBubble(mascotData.pid)) return;
     mascotData.idleBubbleActive = false;
     const s2 = sessions.get(mascotData.pid);
     if (!s2 || s2.status === 'idle') {
@@ -1436,7 +1732,8 @@ function syncMascots() {
       const statusDot = m.el.querySelector('.mascot-status-dot');
       if (statusDot) {
         statusDot.className = 'mascot-status-dot w-1.5 h-1.5 rounded-full inline-block mr-1 ' +
-          (s.status === 'thinking' ? 'bg-indigo-500 animate-pulse' :
+          (s.status === 'compacting' ? 'bg-sky-400 animate-pulse' :
+           s.status === 'thinking' ? 'bg-indigo-500 animate-pulse' :
            s.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500');
       }
 
@@ -1480,7 +1777,7 @@ function syncMascots() {
     const interval = setInterval(() => wanderMascot(el, s.status), getWanderInterval(s.status));
     setTimeout(() => wanderMascot(el, s.status), 1000 + Math.random() * 2000);
 
-    const mascotData = { el, interval, imgInterval, quoteInterval: null, lastStatus: s.status, pid, idleBubbleActive: false, draggedUntil: 0 };
+    const mascotData = { el, interval, imgInterval, quoteInterval: null, lastStatus: s.status, pid, idleBubbleActive: false, draggedUntil: 0, mood: 'normal', moodUntil: 0, interactingUntil: 0 };
     mascotData.quoteInterval = setInterval(() => showRandomQuote(mascotData), 8000 + Math.random() * 7000);
 
     // Enable drag + click interaction

@@ -214,8 +214,43 @@ function aggregateProjects() {
     proj.topFiles = fileEntries.map(([file, count]) => ({ file, count }));
     delete proj.modifiedFiles;
 
-    // Sort tasks by createdAt (newest first), limit to 30
-    proj.tasks.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    // Deduplicate tasks by subject (keep the one with the latest status/timestamp)
+    const taskMap = new Map();
+    for (const t of proj.tasks) {
+      const key = t.subject.trim().toLowerCase();
+      const existing = taskMap.get(key);
+      if (!existing) {
+        taskMap.set(key, t);
+      } else {
+        // Prefer the one with a more advanced status, or the newer one
+        const statusRank = { completed: 3, in_progress: 2, pending: 1 };
+        const eRank = statusRank[existing.status] || 0;
+        const tRank = statusRank[t.status] || 0;
+        if (tRank > eRank || (tRank === eRank && (t.createdAt || 0) > (existing.createdAt || 0))) {
+          taskMap.set(key, t);
+        }
+      }
+    }
+    proj.tasks = [...taskMap.values()];
+
+    // Auto-archive: remove completed tasks older than 24h from display
+    const archiveCutoff = Date.now() - 24 * 60 * 60 * 1000;
+    proj.archivedTaskCount = 0;
+    proj.tasks = proj.tasks.filter(t => {
+      if (t.status === 'completed' && (t.createdAt || 0) < archiveCutoff) {
+        proj.archivedTaskCount++;
+        return false;
+      }
+      return true;
+    });
+
+    // Sort: in_progress first, then pending, then completed; within group by newest
+    const statusOrder = { in_progress: 0, pending: 1, completed: 2 };
+    proj.tasks.sort((a, b) => {
+      const oa = statusOrder[a.status] ?? 1, ob = statusOrder[b.status] ?? 1;
+      if (oa !== ob) return oa - ob;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
     proj.tasks = proj.tasks.slice(0, 30);
   }
 
@@ -314,6 +349,16 @@ function handleEvent(body) {
         }
       }
       break;
+    case 'stop':
+      if (sessions.has(pid)) sessions.get(pid).status = 'idle';
+      if (pid) {
+        const stats = getSessionStats(pid);
+        if (stats.thinkingStartTs) {
+          stats.thinkingDuration += (ts - stats.thinkingStartTs);
+          stats.thinkingStartTs = null;
+        }
+      }
+      break;
     case 'agent_start':
       if (sessions.has(pid)) sessions.get(pid).status = 'running';
       entry.agentName = data?.tool_input?.agent_name || '';
@@ -321,6 +366,13 @@ function handleEvent(body) {
     case 'agent_done':
       if (sessions.has(pid)) sessions.get(pid).status = 'idle';
       break;
+    case 'pre_tool_use': {
+      // Pre-tool: only set entry metadata for the event broadcast, no stat tracking
+      const preToolName = data?.tool_name || '';
+      entry.toolName = preToolName;
+      entry.toolDetail = getToolDetail(preToolName, data?.tool_input);
+      break;
+    }
     case 'tool_use': {
       const toolName = data?.tool_name || '';
       entry.toolName = toolName;
@@ -347,26 +399,65 @@ function handleEvent(body) {
         // Track tasks
         if (toolName === 'TaskCreate' && data?.tool_input?.subject) {
           if (!stats.tasks) stats.tasks = [];
+          const newTaskId = String(stats.tasks.length + 1);
           stats.tasks.push({
+            taskId: data.tool_result_id || newTaskId,
             subject: data.tool_input.subject,
             description: data.tool_input.description || '',
             status: 'pending',
             createdAt: ts,
           });
+          // Cap: keep max 50 tasks per session, prune oldest completed first
+          if (stats.tasks.length > 50) {
+            const completedIdx = stats.tasks.findIndex(t => t.status === 'completed');
+            if (completedIdx !== -1) stats.tasks.splice(completedIdx, 1);
+            else stats.tasks.shift(); // no completed left, drop oldest
+          }
         }
         if (toolName === 'TaskUpdate' && data?.tool_input) {
           if (!stats.tasks) stats.tasks = [];
           const taskId = data.tool_input.taskId;
           const newStatus = data.tool_input.status;
-          // Try to match by recent TaskCreate order (taskId is 1-based index)
-          const idx = parseInt(taskId) - 1;
-          if (newStatus && idx >= 0 && idx < stats.tasks.length) {
-            stats.tasks[idx].status = newStatus;
+          if (newStatus && stats.tasks.length > 0) {
+            // Global taskId doesn't match session-local array index.
+            // Strategy: try session-local 1-based index, stored taskId, then
+            // fallback to matching the most recent task with a different status.
+            const idx = parseInt(taskId) - 1;
+            let matched = false;
+
+            // 1) Exact session-local index (only if within range)
+            if (idx >= 0 && idx < stats.tasks.length) {
+              stats.tasks[idx].status = newStatus;
+              matched = true;
+            }
+
+            // 2) Search by stored taskId
+            if (!matched) {
+              const t = stats.tasks.find(t => t.taskId === taskId);
+              if (t) { t.status = newStatus; matched = true; }
+            }
+
+            // 3) Fallback: update the oldest non-completed task (FIFO order)
+            if (!matched) {
+              for (let i = 0; i < stats.tasks.length; i++) {
+                if (stats.tasks[i].status !== 'completed' && stats.tasks[i].status !== newStatus) {
+                  stats.tasks[i].status = newStatus;
+                  matched = true;
+                  break;
+                }
+              }
+            }
           }
         }
       }
       break;
     }
+    case 'pre_compact':
+      if (sessions.has(pid)) sessions.get(pid).status = 'compacting';
+      break;
+    case 'post_compact':
+      if (sessions.has(pid)) sessions.get(pid).status = 'idle';
+      break;
     case 'permission_request': {
       const toolName = data?.tool_name || '';
       entry.toolName = toolName;
@@ -384,7 +475,7 @@ function handleEvent(body) {
   }
 
   // Periodically save session stats
-  if (pid && sessions.has(pid) && (type === 'tool_use' || type === 'permission_request')) {
+  if (pid && sessions.has(pid) && (type === 'tool_use' || type === 'permission_request' || type === 'post_compact')) {
     saveSession(pid);
   }
 
