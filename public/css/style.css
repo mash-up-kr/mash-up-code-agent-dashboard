@@ -60,28 +60,91 @@ body {
 .mascot {
   position: absolute;
   z-index: 5;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   transition: left 4s cubic-bezier(0.4, 0, 0.2, 1), top 4s cubic-bezier(0.4, 0, 0.2, 1);
   filter: drop-shadow(0 8px 24px rgba(96, 70, 255, 0.15));
 }
+.mascot:hover { filter: drop-shadow(0 8px 32px rgba(96, 70, 255, 0.4)); }
 
 .mascot-img {
   width: 120px;
   height: auto;
   image-rendering: pixelated;
-  animation: mascot-float 3s ease-in-out infinite;
+  animation: mascot-idle 3s ease-in-out infinite;
   display: block;
   will-change: transform;
   position: relative;
 }
 
-@keyframes mascot-float {
+/* ── State-based animations ─────────────────── */
+@keyframes mascot-idle {
   0%   { transform: translateY(0) scale(1) rotate(0deg); }
   25%  { transform: translateY(-6px) scale(1.02) rotate(0.8deg); }
   50%  { transform: translateY(2px) scale(1.01) rotate(-0.5deg); }
   75%  { transform: translateY(-4px) scale(1.02) rotate(0.6deg); }
   100% { transform: translateY(0) scale(1) rotate(0deg); }
 }
+@keyframes mascot-thinking {
+  0%   { transform: translateY(0) scale(1); }
+  50%  { transform: translateY(-2px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes mascot-running {
+  0%   { transform: translateY(0) rotate(0deg) scale(1); }
+  15%  { transform: translateY(-12px) rotate(-3deg) scale(1.04); }
+  30%  { transform: translateY(0) rotate(2deg) scale(1); }
+  45%  { transform: translateY(-10px) rotate(-2deg) scale(1.03); }
+  60%  { transform: translateY(0) rotate(1deg) scale(1); }
+  100% { transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+.mascot[data-status="idle"]     .mascot-img { animation-name: mascot-idle; animation-duration: 3s; }
+.mascot[data-status="thinking"] .mascot-img { animation-name: mascot-thinking; animation-duration: 1.5s; }
+.mascot[data-status="running"]  .mascot-img { animation-name: mascot-running; animation-duration: 1.2s; }
+
+@keyframes mascot-click-bounce {
+  0%   { transform: scale(1) rotate(0deg); }
+  20%  { transform: scale(1.25) rotate(-8deg); }
+  40%  { transform: scale(0.9) rotate(5deg); }
+  60%  { transform: scale(1.1) rotate(-3deg); }
+  80%  { transform: scale(0.98) rotate(1deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+/* ── Mascot speech bubble ───────────────────── */
+.mascot-bubble {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #13151f;
+  border: 1px solid #6046ff40;
+  border-radius: 8px;
+  padding: 3px 8px;
+  font-family: 'Fira Code', monospace;
+  font-size: 9px;
+  color: #c6bfff;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  z-index: 6;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mascot-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid #6046ff40;
+}
+.mascot-bubble.visible { opacity: 1; }
 
 .mascot-label {
   text-align: center;
@@ -97,8 +160,33 @@ body {
   width: fit-content;
   margin-left: auto;
   margin-right: auto;
-  transform: translateY(0);
-  will-change: auto;
+}
+
+/* ── Session detail popup ───────────────────── */
+.mascot-detail {
+  position: fixed;
+  z-index: 50;
+  background: #13151fee;
+  backdrop-filter: blur(16px);
+  border: 1px solid #252838;
+  border-radius: 12px;
+  padding: 16px;
+  width: 300px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  animation: detail-pop 0.2s ease-out;
+}
+@keyframes detail-pop {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Toast animation ─────────────────────────── */
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
 }
 
 /* ── Tab active glow ─────────────────────────── */

@@ -21,12 +21,24 @@ const sessionStats = new Map(); // pid -> { toolCounts, modifiedFiles, eventCoun
 
 function getSessionStats(pid) {
   if (!sessionStats.has(pid)) {
+    // Try to load existing stats from disk
+    let existing = null;
+    try {
+      const filePath = sessionFileName(pid);
+      if (fs.existsSync(filePath)) {
+        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      }
+    } catch (_) { /* ignore */ }
+
     sessionStats.set(pid, {
-      toolCounts: {},
-      modifiedFiles: {},
-      eventCount: 0,
+      toolCounts: existing?.toolCounts || {},
+      modifiedFiles: existing?.modifiedFiles || {},
+      hourlyActivity: existing?.hourlyActivity || {},
+      bashCommands: existing?.bashCommands || [],
+      tasks: existing?.tasks || [],
+      eventCount: existing?.eventCount || 0,
       thinkingStartTs: null,
-      thinkingDuration: 0,
+      thinkingDuration: existing?.thinkingDuration || 0,
     });
   }
   return sessionStats.get(pid);
@@ -58,6 +70,9 @@ function getToolDetail(toolName, input) {
     case 'WebSearch':   return input.query || '';
     case 'Agent':       return input.description || input.prompt?.slice(0, 80) || '';
     case 'TodoWrite':   return (input.todos || []).map(t => t.content).join(', ').slice(0, 100);
+    case 'TaskCreate':  return input.subject || input.description?.slice(0, 60) || '';
+    case 'TaskUpdate':  return input.status ? `#${input.taskId || '?'} → ${input.status}` : `#${input.taskId || '?'}`;
+    case 'ToolSearch':  return input.query || '';
     default:            return JSON.stringify(input).slice(0, 100);
   }
 }
@@ -84,6 +99,9 @@ function saveSession(pid) {
     status: sess.status,
     toolCounts: stats.toolCounts,
     modifiedFiles: stats.modifiedFiles,
+    hourlyActivity: stats.hourlyActivity,
+    bashCommands: stats.bashCommands,
+    tasks: stats.tasks || [],
     eventCount: stats.eventCount,
     thinkingDuration: stats.thinkingDuration,
   };
@@ -126,6 +144,9 @@ function aggregateProjects() {
         toolCounts: {},
         modifiedFiles: {},
         dailyActivity: {},
+        hourlyActivity: {},
+        lastActivityTs: 0,
+        tasks: [],
       };
     }
     const proj = byProject[cwd];
@@ -136,10 +157,15 @@ function aggregateProjects() {
       endedAt: s.endedAt,
       status: s.status,
       eventCount: s.eventCount || 0,
+      thinkingDuration: s.thinkingDuration || 0,
     });
     proj.totalSessions++;
     proj.totalEvents += (s.eventCount || 0);
     proj.totalThinkingDuration += (s.thinkingDuration || 0);
+
+    // Last activity
+    const lastTs = s.endedAt || s.startedAt || 0;
+    if (lastTs > proj.lastActivityTs) proj.lastActivityTs = lastTs;
 
     // Duration
     if (s.startedAt && s.endedAt) {
@@ -164,6 +190,16 @@ function aggregateProjects() {
       const day = new Date(s.startedAt).toISOString().slice(0, 10);
       proj.dailyActivity[day] = (proj.dailyActivity[day] || 0) + (s.eventCount || 0);
     }
+
+    // Hourly activity
+    for (const [hour, count] of Object.entries(s.hourlyActivity || {})) {
+      proj.hourlyActivity[hour] = (proj.hourlyActivity[hour] || 0) + count;
+    }
+
+    // Aggregate tasks
+    for (const t of (s.tasks || [])) {
+      proj.tasks.push({ ...t, sessionName: s.name, sessionPid: s.pid });
+    }
   }
 
   // Sort sessions within each project (newest first) and limit modified files
@@ -177,6 +213,10 @@ function aggregateProjects() {
       .slice(0, 10);
     proj.topFiles = fileEntries.map(([file, count]) => ({ file, count }));
     delete proj.modifiedFiles;
+
+    // Sort tasks by createdAt (newest first), limit to 30
+    proj.tasks.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    proj.tasks = proj.tasks.slice(0, 30);
   }
 
   // Sort projects by most recent activity
@@ -198,11 +238,19 @@ function handleEvent(body) {
 
   // Auto-create session if first event arrives before session_start
   if (pid && !sessions.has(pid) && type !== 'session_end') {
+    // Preserve startedAt from existing saved session
+    let savedStartedAt = null;
+    try {
+      const fp = sessionFileName(pid);
+      if (fs.existsSync(fp)) {
+        savedStartedAt = JSON.parse(fs.readFileSync(fp, 'utf8')).startedAt;
+      }
+    } catch (_) { /* ignore */ }
     sessions.set(pid, {
       pid, cwd, sid,
       name: name || path.basename(cwd || '') || 'unknown',
       status: 'idle',
-      startedAt: ts,
+      startedAt: savedStartedAt || ts,
       endedAt: null,
     });
   }
@@ -211,25 +259,44 @@ function handleEvent(body) {
   if (pid) {
     const stats = getSessionStats(pid);
     stats.eventCount++;
+    const hour = String(new Date(ts).getHours());
+    stats.hourlyActivity[hour] = (stats.hourlyActivity[hour] || 0) + 1;
   }
 
   switch (type) {
-    case 'session_start':
+    case 'session_start': {
+      // Preserve startedAt from existing saved session
+      let savedStart = null;
+      try {
+        const fp = sessionFileName(pid);
+        if (fs.existsSync(fp)) {
+          savedStart = JSON.parse(fs.readFileSync(fp, 'utf8')).startedAt;
+        }
+      } catch (_) { /* ignore */ }
       sessions.set(pid, {
         pid, cwd, sid,
         name: name || path.basename(cwd || '') || 'unknown',
         status: 'idle',
-        startedAt: ts,
+        startedAt: savedStart || ts,
         endedAt: null,
       });
       saveSession(pid);
       break;
+    }
     case 'session_end':
       if (sessions.has(pid)) {
         const sess = sessions.get(pid);
         sess.status = 'ended';
         sess.endedAt = ts;
+        const stats = getSessionStats(pid);
         saveSession(pid);
+        // Broadcast notification
+        broadcast('notification', {
+          type: 'session_end',
+          title: '세션 완료',
+          message: `${sess.name} 세션이 종료되었습니다 (${stats.eventCount} events)`,
+          ts,
+        });
         setTimeout(() => sessions.delete(pid), 3000);
       }
       break;
@@ -268,13 +335,56 @@ function handleEvent(body) {
           const filePath = data.tool_input.file_path;
           stats.modifiedFiles[filePath] = (stats.modifiedFiles[filePath] || 0) + 1;
         }
+
+        // Track bash commands
+        if (toolName === 'Bash' && data?.tool_input?.command) {
+          const cmd = data.tool_input.command.trim();
+          if (cmd && stats.bashCommands.length < 500) {
+            stats.bashCommands.push({ command: cmd, ts });
+          }
+        }
+
+        // Track tasks
+        if (toolName === 'TaskCreate' && data?.tool_input?.subject) {
+          if (!stats.tasks) stats.tasks = [];
+          stats.tasks.push({
+            subject: data.tool_input.subject,
+            description: data.tool_input.description || '',
+            status: 'pending',
+            createdAt: ts,
+          });
+        }
+        if (toolName === 'TaskUpdate' && data?.tool_input) {
+          if (!stats.tasks) stats.tasks = [];
+          const taskId = data.tool_input.taskId;
+          const newStatus = data.tool_input.status;
+          // Try to match by recent TaskCreate order (taskId is 1-based index)
+          const idx = parseInt(taskId) - 1;
+          if (newStatus && idx >= 0 && idx < stats.tasks.length) {
+            stats.tasks[idx].status = newStatus;
+          }
+        }
       }
+      break;
+    }
+    case 'permission_request': {
+      const toolName = data?.tool_name || '';
+      entry.toolName = toolName;
+      entry.toolDetail = getToolDetail(toolName, data?.tool_input);
+      // Broadcast notification so the dashboard can alert the user
+      const sessName = sessions.has(pid) ? sessions.get(pid).name : pid;
+      broadcast('notification', {
+        title: '승인 대기',
+        message: `${sessName}: ${toolName} 사용 승인을 기다리고 있어요`,
+        toolName,
+        toolDetail: entry.toolDetail,
+      });
       break;
     }
   }
 
   // Periodically save session stats
-  if (pid && sessions.has(pid) && type === 'tool_use') {
+  if (pid && sessions.has(pid) && (type === 'tool_use' || type === 'permission_request')) {
     saveSession(pid);
   }
 
@@ -335,6 +445,66 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/projects' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(aggregateProjects()));
+  }
+
+  // Bash commands (all sessions, all projects)
+  if (pathname === '/api/bash-commands' && req.method === 'GET') {
+    const saved = loadAllSavedSessions();
+    const allCmds = [];
+    for (const s of saved) {
+      for (const c of (s.bashCommands || [])) {
+        allCmds.push({
+          command: c.command,
+          ts: c.ts,
+          project: path.basename(s.cwd || '') || 'unknown',
+          cwd: s.cwd,
+          sessionPid: s.pid,
+        });
+      }
+    }
+    // Sort newest first
+    allCmds.sort((a, b) => b.ts - a.ts);
+
+    // Also build frequency map
+    const freq = {};
+    for (const c of allCmds) {
+      const normalized = c.command.split('\n')[0].trim().slice(0, 200);
+      if (!freq[normalized]) freq[normalized] = { command: normalized, count: 0, projects: new Set(), lastTs: 0 };
+      freq[normalized].count++;
+      freq[normalized].projects.add(c.project);
+      if (c.ts > freq[normalized].lastTs) freq[normalized].lastTs = c.ts;
+    }
+    const topCommands = Object.values(freq)
+      .map(f => ({ ...f, projects: [...f.projects] }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 50);
+
+    // Categorize
+    function categorize(cmd) {
+      if (/^git\s/.test(cmd)) return 'git';
+      if (/^(npm|npx|yarn|pnpm|bun)\s/.test(cmd)) return 'package';
+      if (/^(node|python|ruby|java|go|cargo|rustc)\s/.test(cmd)) return 'runtime';
+      if (/^(docker|kubectl|helm)\s/.test(cmd)) return 'infra';
+      if (/^(ls|cd|pwd|cat|head|tail|mkdir|rm|cp|mv|chmod|chown|find|grep|awk|sed|wc|sort|xargs|tar|zip|unzip|curl|wget)\b/.test(cmd)) return 'shell';
+      if (/^(make|cmake|gradle|mvn)\s/.test(cmd)) return 'build';
+      if (/test|spec|jest|vitest|pytest|mocha/.test(cmd)) return 'test';
+      if (/lint|eslint|prettier|fmt/.test(cmd)) return 'lint';
+      return 'other';
+    }
+
+    const categoryCounts = {};
+    for (const c of allCmds) {
+      const cat = categorize(c.command);
+      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      recent: allCmds.slice(0, 100),
+      topCommands,
+      categoryCounts,
+      total: allCmds.length,
+    }));
   }
 
   // Event ingestion (from hook-handler.sh)
