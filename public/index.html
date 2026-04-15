@@ -102,35 +102,6 @@
   <!-- Scrollable nav sections -->
   <nav class="flex-1 overflow-y-auto py-4 space-y-6">
 
-    <!-- MCP Servers -->
-    <div class="px-4">
-      <div class="flex items-center justify-between mb-2 px-2">
-        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">MCP 서버</span>
-        <span class="material-symbols-outlined text-xs text-slate-500 cursor-pointer">expand_more</span>
-      </div>
-      <div class="space-y-1" id="mcp-list">
-        <!-- Populated by JS / placeholder -->
-        <div class="flex items-center justify-between p-2 rounded hover:bg-[#1c1f2e] transition-all cursor-pointer group">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-sm text-[#6046ff]">dns</span>
-            <span class="font-bold text-slate-300">Auth-Service</span>
-          </div>
-          <div class="w-8 h-4 rounded-full bg-[#6046ff] relative">
-            <div class="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white"></div>
-          </div>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded hover:bg-[#1c1f2e] transition-all cursor-pointer group">
-          <div class="flex items-center gap-2">
-            <span class="material-symbols-outlined text-sm text-[#6046ff]">dns</span>
-            <span class="font-bold text-slate-300">Data-Mesh</span>
-          </div>
-          <div class="w-8 h-4 rounded-full bg-[#6046ff] relative">
-            <div class="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Agents -->
     <div class="px-4">
       <div class="flex items-center justify-between mb-2 px-2">
@@ -155,13 +126,6 @@
 
   </nav>
 
-  <!-- New Instance button -->
-  <div class="p-4 border-t border-[#252838]/50">
-    <button class="w-full py-2 bg-[#6046ff] text-white rounded font-bold text-xs flex items-center justify-center gap-2 hover:bg-[#725bff] transition-colors">
-      <span class="material-symbols-outlined text-sm">add</span>
-      New Instance
-    </button>
-  </div>
 </aside>
 
 <!-- ═══════════════════════════════════════════════ -->
@@ -195,14 +159,19 @@
     <!-- Mascots (dynamically created per session) -->
     <div id="mascot-container"></div>
 
-    <!-- Event log panel (floating) -->
-    <div class="absolute top-4 left-4 w-[560px] max-h-[calc(100%-80px)] bg-[#13151f]/92 backdrop-blur-xl border border-[#252838] rounded-lg flex flex-col overflow-hidden z-10">
+    <!-- Project info panel (floating, top-left) -->
+    <div id="project-panel" class="absolute top-4 left-4 w-[420px] max-h-[calc(100%-80px)] bg-[#13151f]/92 backdrop-blur-xl border border-[#252838] rounded-lg flex flex-col overflow-hidden z-10">
       <div class="px-4 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-[#252838] flex items-center justify-between flex-shrink-0">
-        <span>Event Log</span>
-        <span class="text-[10px] font-bold text-[#6046ff] bg-[#6046ff]/10 px-2 py-0.5 rounded-full" id="event-count">0</span>
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[14px] text-[#6046ff]">folder_open</span>
+          <span>프로젝트 기록</span>
+        </div>
+        <button id="btn-project-refresh" class="text-[10px] font-bold text-[#6046ff] bg-[#6046ff]/10 px-2 py-0.5 rounded-full hover:bg-[#6046ff]/20 transition-colors cursor-pointer">
+          <span class="material-symbols-outlined text-[12px] align-middle">refresh</span>
+        </button>
       </div>
-      <div class="flex-1 overflow-y-auto py-1" id="event-log-body">
-        <div class="py-8 text-center text-slate-600 text-xs" id="log-empty">Waiting for events...</div>
+      <div class="flex-1 overflow-y-auto p-3 space-y-3" id="project-panel-body">
+        <div class="py-6 text-center text-slate-600 text-xs" id="project-empty">기록된 프로젝트가 없습니다</div>
       </div>
     </div>
 

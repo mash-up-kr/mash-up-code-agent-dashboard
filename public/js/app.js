@@ -5,13 +5,10 @@
    ══════════════════════════════════════════════════ */
 const sessionsEl     = document.getElementById('session-list');
 const agentsEl       = document.getElementById('agent-list');
-const eventLogBody   = document.getElementById('event-log-body');
-const eventCountEl   = document.getElementById('event-count');
 const statusPill     = document.getElementById('status-pill');
 const headerTime     = document.getElementById('header-time');
 const headerSessLbl  = document.getElementById('header-session-label');
 const canvasEmpty    = document.getElementById('canvas-empty');
-const logEmpty       = document.getElementById('log-empty');
 
 /* Dashboard */
 const statTotalEvents    = document.getElementById('stat-total-events');
@@ -193,28 +190,10 @@ function agentStatusColor(s) {
    Render: Event Log (Workspace)
    ══════════════════════════════════════════════════ */
 function appendEvent(e) {
-  if (logEmpty) logEmpty.style.display = 'none';
   if (canvasEmpty) canvasEmpty.style.display = 'none';
 
   totalEvents++;
   if (e.type === 'tool_use') toolCallCount++;
-
-  if (eventCountEl) eventCountEl.textContent = totalEvents;
-
-  // Workspace event row
-  const row = document.createElement('div');
-  row.className = 'event-row';
-  const detail = e.agentName || e.toolDetail || e.toolName || '';
-  row.innerHTML = `
-    <span class="ev-time">${hhmm(e.ts)}</span>
-    <span class="ev-session" title="${esc(e.name || '')}">${esc(e.name || '')}</span>
-    <span class="ev-type t-${e.type || 'unknown'}">${esc(e.type)}</span>
-    <span class="ev-detail" title="${esc(detail)}">${esc(detail)}</span>`;
-
-  const atBottom = eventLogBody.scrollHeight - eventLogBody.clientHeight - eventLogBody.scrollTop < 60;
-  eventLogBody.appendChild(row);
-  if (atBottom) eventLogBody.scrollTop = eventLogBody.scrollHeight;
-  while (eventLogBody.children.length > 200) eventLogBody.removeChild(eventLogBody.firstChild);
 
   // Track for dashboard
   eventHistory.push(e);
@@ -236,9 +215,37 @@ function appendEvent(e) {
 /* ══════════════════════════════════════════════════
    Render: Dashboard
    ══════════════════════════════════════════════════ */
+let weeklySessionCount = 0;
+
+function updateWeeklySessionCount() {
+  fetch('/api/projects')
+    .then(r => r.json())
+    .then(projects => {
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset);
+      monday.setHours(0, 0, 0, 0);
+      const mondayTs = monday.getTime();
+
+      let count = 0;
+      for (const proj of projects) {
+        for (const s of proj.sessions || []) {
+          if (s.startedAt >= mondayTs) count++;
+        }
+      }
+      weeklySessionCount = count;
+      if (statActiveSessions) statActiveSessions.textContent = weeklySessionCount;
+    })
+    .catch(() => {});
+}
+
+updateWeeklySessionCount();
+setInterval(updateWeeklySessionCount, 30000);
+
 function updateDashboard() {
   if (statTotalEvents) statTotalEvents.textContent = totalEvents.toLocaleString();
-  if (statActiveSessions) statActiveSessions.textContent = sessions.size;
+  if (statActiveSessions) statActiveSessions.textContent = weeklySessionCount;
   if (syncLabel) syncLabel.textContent = 'Sync: just now';
 
   // Estimate cost (rough: ~$0.003 per event as illustrative)
@@ -381,6 +388,10 @@ function connect() {
     }
     trackEventType(ev);
     appendEvent(ev);
+    // Refresh project panel on session lifecycle events
+    if (['session_start', 'session_end'].includes(ev.type)) {
+      setTimeout(loadProjects, 500);
+    }
   });
 
   es.onerror = () => {
@@ -395,6 +406,171 @@ function trackEventType(ev) {
 }
 
 connect();
+
+/* ══════════════════════════════════════════════════
+   Project Panel
+   ══════════════════════════════════════════════════ */
+const projectPanelBody = document.getElementById('project-panel-body');
+const projectEmpty = document.getElementById('project-empty');
+
+function formatDuration(ms) {
+  if (!ms || ms <= 0) return '0s';
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return sec + 's';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + 'm ' + (sec % 60) + 's';
+  const hr = Math.floor(min / 60);
+  return hr + 'h ' + (min % 60) + 'm';
+}
+
+function formatDate(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function toolIcon(name) {
+  const icons = {
+    Bash: 'terminal', Read: 'description', Write: 'edit_document',
+    Edit: 'edit', Grep: 'search', Glob: 'folder_open',
+    Agent: 'smart_toy', WebFetch: 'language', WebSearch: 'travel_explore',
+  };
+  return icons[name] || 'build';
+}
+
+function renderProjectPanel(projects) {
+  if (!projectPanelBody) return;
+  if (!projects || projects.length === 0) {
+    if (projectEmpty) projectEmpty.style.display = '';
+    return;
+  }
+  if (projectEmpty) projectEmpty.style.display = 'none';
+
+  projectPanelBody.innerHTML = projects.map(proj => {
+    // Tool chart — horizontal bars
+    const toolEntries = Object.entries(proj.toolCounts || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const maxTool = toolEntries.length > 0 ? toolEntries[0][1] : 1;
+    const toolBars = toolEntries.map(([name, count]) => {
+      const pct = Math.max(8, (count / maxTool) * 100);
+      return `
+        <div class="flex items-center gap-2 text-[10px]">
+          <span class="material-symbols-outlined text-[12px] text-slate-500">${toolIcon(name)}</span>
+          <span class="w-14 text-slate-400 truncate">${esc(name)}</span>
+          <div class="flex-1 h-1.5 bg-[#1c1f2e] rounded-full overflow-hidden">
+            <div class="h-full bg-[#6046ff] rounded-full" style="width:${pct}%"></div>
+          </div>
+          <span class="w-8 text-right text-slate-500 font-mono">${count}</span>
+        </div>`;
+    }).join('');
+
+    // Top modified files
+    const fileRows = (proj.topFiles || []).slice(0, 5).map(f => {
+      const shortPath = f.file.split('/').slice(-2).join('/');
+      return `
+        <div class="flex items-center justify-between text-[10px] py-0.5">
+          <span class="text-slate-400 truncate flex-1" title="${esc(f.file)}">${esc(shortPath)}</span>
+          <span class="text-[#6046ff] font-mono ml-2">${f.count}x</span>
+        </div>`;
+    }).join('');
+
+    // Recent sessions (last 5)
+    const sessionRows = (proj.sessions || []).slice(0, 5).map(s => {
+      const dur = s.endedAt && s.startedAt ? formatDuration(s.endedAt - s.startedAt) : (s.status !== 'ended' ? 'active' : '-');
+      const statusDot = s.status === 'ended' ? 'bg-slate-500' : 'bg-emerald-500 animate-pulse';
+      return `
+        <div class="flex items-center gap-2 text-[10px] py-0.5">
+          <span class="w-1.5 h-1.5 rounded-full ${statusDot} flex-shrink-0"></span>
+          <span class="text-slate-400 flex-1 truncate">${esc(formatDate(s.startedAt))}</span>
+          <span class="text-slate-500 font-mono">${dur}</span>
+          <span class="text-slate-600 font-mono">${s.eventCount}ev</span>
+        </div>`;
+    }).join('');
+
+    // Daily activity sparkline (last 14 days)
+    const dailyEntries = Object.entries(proj.dailyActivity || {}).sort().slice(-14);
+    let sparkline = '';
+    if (dailyEntries.length > 0) {
+      const maxDay = Math.max(1, ...dailyEntries.map(e => e[1]));
+      const bars = dailyEntries.map(([day, count]) => {
+        const h = Math.max(2, (count / maxDay) * 24);
+        const label = day.slice(5); // MM-DD
+        return `<div class="flex flex-col items-center gap-0.5" title="${label}: ${count} events">
+          <div class="w-2 bg-[#6046ff]/60 rounded-sm" style="height:${h}px"></div>
+        </div>`;
+      }).join('');
+      sparkline = `
+        <div class="mt-2">
+          <div class="text-[9px] text-slate-600 mb-1">최근 활동</div>
+          <div class="flex items-end gap-0.5 h-6">${bars}</div>
+        </div>`;
+    }
+
+    return `
+      <div class="bg-[#0d0f18] border border-[#252838] rounded-lg p-3 hover:border-[#6046ff]/30 transition-colors">
+        <!-- Project header -->
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-[16px] text-[#6046ff]">folder</span>
+            <span class="text-xs font-bold text-slate-200 truncate">${esc(proj.name)}</span>
+          </div>
+          <span class="text-[9px] text-slate-600 font-mono truncate ml-2 max-w-[180px]" title="${esc(proj.cwd)}">${esc(proj.cwd)}</span>
+        </div>
+
+        <!-- Stats row -->
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <div class="bg-[#1c1f2e] rounded px-2 py-1.5 text-center">
+            <div class="text-[10px] text-slate-500">세션</div>
+            <div class="text-sm font-bold text-white font-mono">${proj.totalSessions}</div>
+          </div>
+          <div class="bg-[#1c1f2e] rounded px-2 py-1.5 text-center">
+            <div class="text-[10px] text-slate-500">사용 시간</div>
+            <div class="text-sm font-bold text-white font-mono">${formatDuration(proj.totalDuration)}</div>
+          </div>
+          <div class="bg-[#1c1f2e] rounded px-2 py-1.5 text-center">
+            <div class="text-[10px] text-slate-500">이벤트</div>
+            <div class="text-sm font-bold text-white font-mono">${proj.totalEvents.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <!-- Tool usage -->
+        ${toolBars ? `
+        <div class="mb-3">
+          <div class="text-[9px] text-slate-600 uppercase tracking-wider mb-1.5">도구 사용</div>
+          <div class="space-y-1">${toolBars}</div>
+        </div>` : ''}
+
+        <!-- Top files -->
+        ${fileRows ? `
+        <div class="mb-2">
+          <div class="text-[9px] text-slate-600 uppercase tracking-wider mb-1">자주 수정된 파일</div>
+          ${fileRows}
+        </div>` : ''}
+
+        <!-- Daily sparkline -->
+        ${sparkline}
+
+        <!-- Recent sessions -->
+        ${sessionRows ? `
+        <div class="mt-2 pt-2 border-t border-[#252838]/50">
+          <div class="text-[9px] text-slate-600 uppercase tracking-wider mb-1">최근 세션</div>
+          ${sessionRows}
+        </div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function loadProjects() {
+  fetch('/api/projects')
+    .then(r => r.json())
+    .then(renderProjectPanel)
+    .catch(() => {});
+}
+
+// Load projects on startup and refresh periodically
+loadProjects();
+setInterval(loadProjects, 30000);
+
+// Refresh button
+document.getElementById('btn-project-refresh')?.addEventListener('click', loadProjects);
 
 /* ══════════════════════════════════════════════════
    Floating Mascots (one per session)
