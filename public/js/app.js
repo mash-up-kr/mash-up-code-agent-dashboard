@@ -270,21 +270,24 @@ function appendEvent(e) {
     const m = activeMascots.get(e.pid);
     if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
   }
-  // Stop — Claude finished responding: clear all priority states and show idle reaction
+  // Stop — Claude finished responding: clear priority states and show persistent completion message
   if (e.type === 'stop' && e.pid) {
     sessionPermPending.delete(e.pid);
     sessionCompacting.delete(e.pid);
+    // Don't overwrite excited completion message from task completion
+    if (!sessionStopMessage.has(e.pid)) {
+      const stopQuotes = ['끝! 다음은 뭐 할까?', '응답 완료~', '다 했어!', '자 이제 너 차례야~', '완료! 확인해봐~'];
+      sessionStopMessage.set(e.pid, { quote: stopQuotes[Math.floor(Math.random() * stopQuotes.length)], excited: false, ts: Date.now() });
+    }
     const m = activeMascots.get(e.pid);
-    if (m) {
-      const bubble = m.el.querySelector('.mascot-bubble');
-      if (bubble) {
-        bubble.style.borderColor = ''; // reset priority border
-        const stopQuotes = ['끝! 다음은 뭐 할까?', '응답 완료~', '다 했어!', '자 이제 너 차례야~', '완료! 확인해봐~'];
-        bubble.textContent = stopQuotes[Math.floor(Math.random() * stopQuotes.length)];
-        bubble.classList.add('visible');
-        m.idleBubbleActive = true;
-        setTimeout(() => { if (!hasPriorityBubble(e.pid)) { m.idleBubbleActive = false; bubble.classList.remove('visible'); } }, 8000);
-      }
+    if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
+  }
+  // Clear completion message when new activity starts
+  if ((e.type === 'thinking_start' || e.type === 'agent_start') && e.pid) {
+    if (sessionStopMessage.has(e.pid)) {
+      sessionStopMessage.delete(e.pid);
+      const m = activeMascots.get(e.pid);
+      if (m) { const b = m.el.querySelector('.mascot-bubble'); if (b) b.style.borderColor = ''; }
     }
   }
 
@@ -1303,10 +1306,11 @@ const sessionPermPending = new Map(); // pid -> { toolName, toolDetail, ts }
 const sessionCurrentTask = new Map(); // pid -> { subject } — currently in-progress task
 const sessionTaskList = new Map(); // pid -> [{subject, status}] — all tasks for this session
 const sessionCompacting = new Set(); // pid set — sessions currently compacting
+const sessionStopMessage = new Map(); // pid -> { quote, excited, ts } — persistent completion message
 
-/** Returns true if this session has a high-priority bubble (permission/compaction) that must not be overridden. */
+/** Returns true if this session has a high-priority bubble (permission/compaction/completion) that must not be overridden. */
 function hasPriorityBubble(pid) {
-  return sessionPermPending.has(pid) || sessionCompacting.has(pid);
+  return sessionPermPending.has(pid) || sessionCompacting.has(pid) || sessionStopMessage.has(pid);
 }
 
 /* ── Emotion / Mood System ───────────────────── */
@@ -1341,22 +1345,17 @@ function getMoodFilter(mood) {
   }
 }
 
-// Trigger excited mood on task completion
+// Trigger excited mood on task completion — persistent like permission/compaction
 function triggerExcitedMood(pid) {
   const m = activeMascots.get(pid);
   if (!m) return;
   m.mood = 'excited';
   m.moodUntil = Date.now() + 15000;
   applyMood(m);
-  if (hasPriorityBubble(pid)) return; // don't override permission/compaction bubble
-  const bubble = m.el.querySelector('.mascot-bubble');
-  if (bubble) {
-    const q = moodQuotes.excited[Math.floor(Math.random() * moodQuotes.excited.length)];
-    bubble.textContent = getMoodEmoji('excited') + ' ' + q;
-    bubble.classList.add('visible');
-    m.idleBubbleActive = true;
-    setTimeout(() => { if (!hasPriorityBubble(pid)) { m.idleBubbleActive = false; bubble.classList.remove('visible'); } }, 10000);
-  }
+  if (sessionPermPending.has(pid) || sessionCompacting.has(pid)) return; // don't override permission/compaction bubble
+  const q = moodQuotes.excited[Math.floor(Math.random() * moodQuotes.excited.length)];
+  sessionStopMessage.set(pid, { quote: q, excited: true, ts: Date.now() });
+  updateBubble(m, sessions.get(pid)?.status || 'idle');
 }
 
 function applyMood(m) {
@@ -1533,6 +1532,27 @@ function updateBubble(mascotData, status) {
     </span>`;
     bubble.classList.add('visible');
     bubble.style.borderColor = 'rgba(56,189,248,0.5)';
+    mascotData.idleBubbleActive = false;
+    return;
+  }
+
+  // Completion — persistent until next activity (like permission request)
+  const stopMsg = sessionStopMessage.get(pid);
+  if (stopMsg) {
+    if (stopMsg.excited) {
+      bubble.innerHTML = `<span style="color:#fbbf24">
+        <span class="material-symbols-outlined text-[10px] align-middle">celebration</span>
+        🎉 ${esc(stopMsg.quote)}
+      </span>`;
+      bubble.style.borderColor = 'rgba(251,191,36,0.5)';
+    } else {
+      bubble.innerHTML = `<span style="color:#4ade80">
+        <span class="material-symbols-outlined text-[10px] align-middle">check_circle</span>
+        ${esc(stopMsg.quote)}
+      </span>`;
+      bubble.style.borderColor = 'rgba(74,222,128,0.5)';
+    }
+    bubble.classList.add('visible');
     mascotData.idleBubbleActive = false;
     return;
   }
