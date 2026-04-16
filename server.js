@@ -19,6 +19,30 @@ const clients = new Set();  // SSE clients
 // Per-session accumulated stats (for persistence)
 const sessionStats = new Map(); // pid -> { toolCounts, modifiedFiles, eventCount, thinkingStartTs }
 
+// ── Inactivity reaper ───────────────────────────
+const INACTIVE_TIMEOUT_MS = 20_000; // 20 seconds
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [pid, sess] of sessions) {
+    if (sess.status === 'ended') continue;
+    if (sess.lastActivityAt && now - sess.lastActivityAt > INACTIVE_TIMEOUT_MS) {
+      sess.status = 'ended';
+      sess.endedAt = now;
+      const stats = getSessionStats(pid);
+      saveSession(pid);
+      broadcast('notification', {
+        type: 'session_end',
+        title: '세션 타임아웃',
+        message: `${sess.name} 세션이 비활성으로 종료되었습니다 (${stats.eventCount} events)`,
+        ts: now,
+      });
+      broadcast('session', sess);
+      setTimeout(() => sessions.delete(pid), 3000);
+    }
+  }
+}, 5000); // check every 5 seconds
+
 function getSessionStats(pid) {
   if (!sessionStats.has(pid)) {
     // Try to load existing stats from disk
@@ -287,7 +311,13 @@ function handleEvent(body) {
       status: 'idle',
       startedAt: savedStartedAt || ts,
       endedAt: null,
+      lastActivityAt: ts,
     });
+  }
+
+  // Update lastActivityAt on every event
+  if (pid && sessions.has(pid)) {
+    sessions.get(pid).lastActivityAt = ts;
   }
 
   // Track stats
@@ -314,6 +344,7 @@ function handleEvent(body) {
         status: 'idle',
         startedAt: savedStart || ts,
         endedAt: null,
+        lastActivityAt: ts,
       });
       saveSession(pid);
       break;
