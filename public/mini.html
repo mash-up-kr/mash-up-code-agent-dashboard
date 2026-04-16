@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mash-Up Mascots</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/img/mash-up-logo.svg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d0f18;
+      color: #e3e1ec;
+      font-family: 'Fira Code', monospace;
+      overflow: hidden;
+      height: 100vh;
+      position: relative;
+      background-image: radial-gradient(circle, #252838 1px, transparent 1px);
+      background-size: 24px 24px;
+      user-select: none;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+
+    /* ── Mascot ──────────────────────────────────── */
+    .mascot {
+      position: absolute; z-index: 5; pointer-events: auto; cursor: grab;
+      transition: left 4s cubic-bezier(0.4,0,0.2,1), top 4s cubic-bezier(0.4,0,0.2,1);
+      filter: drop-shadow(0 6px 16px rgba(96,70,255,0.15));
+    }
+    .mascot:active { cursor: grabbing; }
+    .mascot-img {
+      width: 80px; height: auto; image-rendering: pixelated; display: block;
+      animation: mascot-idle 3s ease-in-out infinite;
+    }
+    @keyframes mascot-idle {
+      0%   { transform: translateY(0) scale(1) rotate(0deg); }
+      25%  { transform: translateY(-4px) scale(1.02) rotate(0.8deg); }
+      50%  { transform: translateY(2px) scale(1.01) rotate(-0.5deg); }
+      75%  { transform: translateY(-3px) scale(1.02) rotate(0.6deg); }
+      100% { transform: translateY(0) scale(1) rotate(0deg); }
+    }
+    @keyframes mascot-thinking {
+      0%   { transform: translateY(0) scale(1); }
+      50%  { transform: translateY(-2px) scale(1.05); }
+      100% { transform: translateY(0) scale(1); }
+    }
+    @keyframes mascot-running {
+      0%   { transform: translateY(0) rotate(0deg) scale(1); }
+      15%  { transform: translateY(-8px) rotate(-3deg) scale(1.04); }
+      30%  { transform: translateY(0) rotate(2deg) scale(1); }
+      45%  { transform: translateY(-6px) rotate(-2deg) scale(1.03); }
+      60%  { transform: translateY(0) rotate(1deg) scale(1); }
+      100% { transform: translateY(0) rotate(0deg) scale(1); }
+    }
+    .mascot[data-status="idle"]     .mascot-img { animation-name: mascot-idle; animation-duration: 3s; }
+    .mascot[data-status="thinking"] .mascot-img { animation-name: mascot-thinking; animation-duration: 1.5s; }
+    .mascot[data-status="running"]  .mascot-img { animation-name: mascot-running; animation-duration: 1.2s; }
+
+    /* ── Bubble ──────────────────────────────────── */
+    .mascot-bubble {
+      position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+      background: #13151f; border: 1px solid #6046ff40; border-radius: 6px;
+      padding: 2px 6px; font-size: 8px; color: #c6bfff;
+      white-space: nowrap; opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; z-index: 6; max-width: 160px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .mascot-bubble::after {
+      content: ''; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+      border-left: 4px solid transparent; border-right: 4px solid transparent;
+      border-top: 4px solid #6046ff40;
+    }
+    .mascot-bubble.visible { opacity: 1; }
+    .mascot-label {
+      text-align: center; font-size: 8px; color: #c6bfff;
+      background: rgba(96,70,255,0.12); border: 1px solid rgba(96,70,255,0.25);
+      border-radius: 3px; padding: 1px 6px; margin-top: 2px;
+      white-space: nowrap; width: fit-content; margin-left: auto; margin-right: auto;
+    }
+
+    /* ── Status bar ──────────────────────────────── */
+    .status-bar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: #13151fee; backdrop-filter: blur(8px);
+      border-top: 1px solid #252838; padding: 5px 10px;
+      display: flex; align-items: center; gap: 6px; z-index: 20;
+      flex-wrap: wrap; min-height: 28px;
+    }
+    .status-chip {
+      display: flex; align-items: center; gap: 4px;
+      background: #1c1f2e; border: 1px solid #252838; border-radius: 4px;
+      padding: 2px 8px; font-size: 9px;
+    }
+    .status-dot {
+      width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-label { font-weight: bold; font-size: 8px; }
+
+    /* ── Empty state ─────────────────────────────── */
+    .empty-state {
+      position: absolute; inset: 0; bottom: 28px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      opacity: 0.3; pointer-events: none;
+    }
+
+    /* ── Top bar ─────────────────────────────────── */
+    .top-bar {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+      background: #13151fcc; backdrop-filter: blur(8px);
+      border-bottom: 1px solid #25283860;
+      padding: 4px 10px; display: flex; align-items: center; justify-content: space-between;
+      -webkit-app-region: drag; /* allows window dragging from title bar area */
+    }
+    .top-bar button { -webkit-app-region: no-drag; }
+    .top-title {
+      font-size: 9px; color: #6046ff; font-weight: bold; letter-spacing: 0.05em;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .top-btn {
+      background: none; border: none; color: #474556; cursor: pointer;
+      padding: 2px; border-radius: 3px; display: flex; align-items: center;
+      transition: color 0.15s, background 0.15s;
+    }
+    .top-btn:hover { color: #c6bfff; background: #1c1f2e; }
+
+    /* ── Connection indicator ────────────────────── */
+    .conn-dot {
+      width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
+    }
+    .conn-dot.ok { background: #10b981; }
+    .conn-dot.err { background: #ef4444; }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+
+    /* ── Scrollbar ───────────────────────────────── */
+    ::-webkit-scrollbar { width: 0; height: 0; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="top-bar">
+  <div class="top-title">
+    <span class="conn-dot" id="conn-dot"></span>
+    <span>MASHONG MINI</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:2px;">
+    <button class="top-btn" id="btn-opacity" title="반투명 전환">
+      <span class="material-symbols-outlined" style="font-size:14px;">opacity</span>
+    </button>
+    <button class="top-btn" id="btn-open-main" title="메인 대시보드 열기">
+      <span class="material-symbols-outlined" style="font-size:14px;">open_in_new</span>
+    </button>
+  </div>
+</div>
+
+<!-- Mascot area -->
+<div id="mascot-area" style="position:absolute;top:24px;left:0;right:0;bottom:28px;overflow:hidden;"></div>
+
+<!-- Empty state -->
+<div class="empty-state" id="empty-state">
+  <span class="material-symbols-outlined" style="font-size:28px;color:#6046ff;">pets</span>
+  <span style="font-size:9px;color:#474556;margin-top:4px;">세션 대기 중...</span>
+</div>
+
+<!-- Status bar -->
+<div class="status-bar" id="status-bar">
+  <span style="font-size:9px;color:#474556;">연결 중...</span>
+</div>
+
+<script>
+'use strict';
+
+const mascotArea = document.getElementById('mascot-area');
+const statusBar = document.getElementById('status-bar');
+const emptyState = document.getElementById('empty-state');
+const connDot = document.getElementById('conn-dot');
+
+const sessions = new Map();
+const mascots = new Map();     // pid -> { el, imgInterval, lastWander }
+const lastTools = new Map();   // pid -> { toolName, toolDetail, ts }
+const permPending = new Map(); // pid -> { toolName }
+const compacting = new Set();
+const stopMessages = new Map();
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/* ── SSE Connection ─────────────────────────────── */
+function connect() {
+  connDot.className = 'conn-dot err';
+  const es = new EventSource('/api/stream');
+
+  es.addEventListener('connected', () => { connDot.className = 'conn-dot ok'; });
+
+  es.addEventListener('init', e => {
+    const { sessions: s, events: ev } = JSON.parse(e.data);
+    sessions.clear();
+    s.forEach(sess => sessions.set(sess.pid, sess));
+    ev.forEach(processEvent);
+    sync();
+  });
+
+  es.addEventListener('session', e => {
+    const s = JSON.parse(e.data);
+    sessions.set(s.pid, s);
+    if (s.status === 'ended') setTimeout(() => { sessions.delete(s.pid); sync(); }, 3000);
+    sync();
+  });
+
+  es.addEventListener('event', e => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'session_start' && !sessions.has(ev.pid)) {
+      sessions.set(ev.pid, { pid: ev.pid, cwd: ev.cwd, name: ev.name, sid: ev.sid, status: 'idle', startedAt: ev.ts });
+    }
+    processEvent(ev);
+    sync();
+  });
+
+  es.onerror = () => { connDot.className = 'conn-dot err'; es.close(); setTimeout(connect, 3000); };
+}
+
+function processEvent(e) {
+  if ((e.type === 'tool_use' || e.type === 'pre_tool_use') && e.pid) {
+    lastTools.set(e.pid, { toolName: e.toolName, toolDetail: e.toolDetail || '', ts: e.ts });
+    if (e.type === 'tool_use') permPending.delete(e.pid);
+  }
+  if (e.type === 'permission_request' && e.pid) {
+    permPending.set(e.pid, { toolName: e.toolName, toolDetail: e.toolDetail || '' });
+  }
+  if (e.type === 'pre_compact' && e.pid) compacting.add(e.pid);
+  if (e.type === 'post_compact' && e.pid) compacting.delete(e.pid);
+  if (e.type === 'stop' && e.pid) {
+    permPending.delete(e.pid);
+    compacting.delete(e.pid);
+    if (!stopMessages.has(e.pid)) {
+      const quotes = ['끝! 다음 메시지 보내줘~', '응답 완료! 확인해봐~', '다 했어! 이어서 보내줘~', '입력 기다리는 중~', '완료!'];
+      stopMessages.set(e.pid, quotes[Math.floor(Math.random() * quotes.length)]);
+    }
+  }
+  if ((e.type === 'thinking_start' || e.type === 'agent_start') && e.pid) {
+    stopMessages.delete(e.pid);
+  }
+}
+
+/* ── Idle quotes ────────────────────────────────── */
+const idleQuotes = [
+  '코드 냄새가 나는데...?', '버그 어디 숨었어~', '리팩토링하고 싶다...',
+  '커밋 메시지 뭐라 쓰지', '테스트 다 통과했으면...', 'npm install 중...',
+  '오늘도 열코 화이팅!', 'git push 해도 될까?', '이 코드 누가 짠 거야',
+  'PR 리뷰 부탁해요~', '점심 뭐 먹지?', 'TODO 가 점점 늘어나...',
+  '오 이거 깔끔한데', 'LGTM!', '.env 커밋하면 안 돼!',
+  '왜 로컬에서만 돼?', 'merge conflict ㅠㅠ', '다크모드 최고!',
+];
+
+/* ── Tool bubble helpers ────────────────────────── */
+function toolIcon(name) {
+  const m = { Bash:'terminal', Read:'description', Write:'edit_document', Edit:'edit',
+    Grep:'search', Glob:'folder_open', Agent:'smart_toy', TaskCreate:'checklist',
+    TaskUpdate:'task_alt', ToolSearch:'manage_search' };
+  return m[name] || 'build';
+}
+
+function toolMsg(t) {
+  const fn = t.toolDetail ? t.toolDetail.split('/').pop().slice(0, 20) : '';
+  const m = { Read: fn ? fn+' 읽는 중~' : '파일 읽는 중~', Edit: fn ? fn+' 고치는 중!' : '코드 수정 중!',
+    Write: fn ? fn+' 쓰는 중~' : '파일 만드는 중~', Bash: '명령어 실행 중..뿅!',
+    Grep: '코드 찾는 중~', Glob: '파일 찾는 중~', Agent: '친구한테 부탁 중~' };
+  return m[t.toolName] || (t.toolName + ' 쓰는 중~');
+}
+
+/* ── Build bubble HTML ──────────────────────────── */
+function getBubbleContent(pid, status) {
+  const perm = permPending.get(pid);
+  if (perm) {
+    return { html: `<span class="animate-pulse" style="color:#fb923c"><span class="material-symbols-outlined" style="font-size:9px;vertical-align:middle;">front_hand</span> 승인 대기! (${esc(perm.toolName)})</span>`, border: 'rgba(251,146,60,0.5)', show: true };
+  }
+  if (compacting.has(pid)) {
+    return { html: `<span class="animate-pulse" style="color:#38bdf8"><span class="material-symbols-outlined" style="font-size:9px;vertical-align:middle;">compress</span> 컴팩션 중...</span>`, border: 'rgba(56,189,248,0.5)', show: true };
+  }
+  const stop = stopMessages.get(pid);
+  if (stop) {
+    return { html: `<span style="color:#4ade80"><span class="material-symbols-outlined" style="font-size:9px;vertical-align:middle;">check_circle</span> ${esc(stop)}</span>`, border: 'rgba(74,222,128,0.5)', show: true };
+  }
+  const lt = lastTools.get(pid);
+  if (status === 'thinking') {
+    return { html: '<span class="animate-pulse">thinking...</span>', border: '', show: true };
+  }
+  if (status === 'running' && lt) {
+    return { html: `<span class="material-symbols-outlined" style="font-size:9px;vertical-align:middle;">${toolIcon(lt.toolName)}</span> ${esc(toolMsg(lt))}`, border: '', show: true };
+  }
+  if (lt && Date.now() - lt.ts < 5000) {
+    return { html: `<span class="material-symbols-outlined" style="font-size:9px;vertical-align:middle;">${toolIcon(lt.toolName)}</span> ${esc(toolMsg(lt))}`, border: '', show: true };
+  }
+  return null; // no bubble
+}
+
+/* ── Sync mascots and status bar ────────────────── */
+function sync() {
+  const areaW = mascotArea.clientWidth || 400;
+  const areaH = mascotArea.clientHeight || 260;
+
+  for (const [pid, s] of sessions) {
+    if (s.status === 'ended') continue;
+
+    if (!mascots.has(pid)) {
+      const el = document.createElement('div');
+      el.className = 'mascot';
+      el.setAttribute('data-status', s.status);
+      el.innerHTML = `
+        <div class="mascot-bubble"></div>
+        <img src="/img/mascot-default.png" alt="${esc(s.name)}" class="mascot-img" draggable="false">
+        <div class="mascot-label">${esc(s.name || pid)}</div>`;
+      el.style.left = (Math.random() * (areaW - 100) + 10) + 'px';
+      el.style.top = (Math.random() * (areaH - 100) + 10) + 'px';
+
+      const img = el.querySelector('.mascot-img');
+      const frames = ['/img/mascot-default.png', '/img/mascot-move.png'];
+      let fi = 0;
+      const imgInterval = setInterval(() => { img.src = frames[fi]; fi = (fi + 1) % 2; }, 600);
+
+      // Drag support
+      enableDrag(el);
+
+      mascotArea.appendChild(el);
+      mascots.set(pid, { el, imgInterval, lastWander: 0, draggedUntil: 0,
+        idleQuoteTimeout: null, idleBubbleActive: false });
+    }
+
+    const m = mascots.get(pid);
+    m.el.setAttribute('data-status', s.status);
+
+    // Bubble
+    const bc = getBubbleContent(pid, s.status);
+    const bubble = m.el.querySelector('.mascot-bubble');
+    if (bc && bc.show) {
+      bubble.innerHTML = bc.html;
+      bubble.style.borderColor = bc.border || '';
+      bubble.classList.add('visible');
+      m.idleBubbleActive = false;
+    } else if (!m.idleBubbleActive) {
+      bubble.classList.remove('visible');
+      bubble.style.borderColor = '';
+    }
+  }
+
+  // Remove ended
+  for (const [pid, m] of mascots) {
+    const s = sessions.get(pid);
+    if (!s || s.status === 'ended') {
+      m.el.style.opacity = '0'; m.el.style.transition = 'opacity 0.5s';
+      clearInterval(m.imgInterval);
+      clearTimeout(m.idleQuoteTimeout);
+      setTimeout(() => m.el.remove(), 500);
+      mascots.delete(pid);
+    }
+  }
+
+  // Empty state
+  emptyState.style.display = mascots.size > 0 ? 'none' : '';
+
+  // Status bar
+  const chips = [];
+  for (const [pid, s] of sessions) {
+    if (s.status === 'ended') continue;
+    const dotColor = { running:'#f59e0b', thinking:'#818cf8', idle:'#10b981', compacting:'#38bdf8' }[s.status] || '#10b981';
+    const label = { running:'RUN', thinking:'THINK', idle:'IDLE', compacting:'COMPACT' }[s.status] || 'IDLE';
+    const labelColor = { running:'#fbbf24', thinking:'#a5b4fc', idle:'#34d399', compacting:'#7dd3fc' }[s.status] || '#34d399';
+    const pulseClass = (s.status === 'thinking' || s.status === 'running') ? ' animate-pulse' : '';
+    const perm = permPending.has(pid) ? '<span style="color:#fb923c;font-size:7px;margin-left:2px;" class="animate-pulse">PERM</span>' : '';
+    chips.push(`<div class="status-chip">
+      <span class="status-dot${pulseClass}" style="background:${dotColor}"></span>
+      <span style="color:#c6bfff;font-size:8px;max-width:80px;overflow:hidden;text-overflow:ellipsis;">${esc((s.name||pid).slice(0,14))}</span>
+      <span class="status-label" style="color:${labelColor}">${label}</span>${perm}
+    </div>`);
+  }
+  statusBar.innerHTML = chips.length > 0 ? chips.join('') : '<span style="font-size:9px;color:#474556;">세션 없음</span>';
+}
+
+/* ── Wander ──────────────────────────────────────── */
+function wander() {
+  const areaW = mascotArea.clientWidth || 400;
+  const areaH = mascotArea.clientHeight || 260;
+
+  for (const [pid, m] of mascots) {
+    if (m.draggedUntil > Date.now()) continue;
+    const s = sessions.get(pid);
+    if (!s || s.status === 'ended') continue;
+
+    const curLeft = parseFloat(m.el.style.left) || areaW / 2;
+    const curTop = parseFloat(m.el.style.top) || areaH / 2;
+    let nx, ny;
+    if (s.status === 'thinking') {
+      nx = Math.max(10, Math.min(areaW - 100, curLeft + (Math.random() - 0.5) * 30));
+      ny = Math.max(10, Math.min(areaH - 100, curTop + (Math.random() - 0.5) * 20));
+    } else if (s.status === 'running') {
+      nx = Math.random() * (areaW - 100) + 10;
+      ny = Math.random() * (areaH - 100) + 10;
+    } else {
+      nx = Math.max(10, Math.min(areaW - 100, curLeft + (Math.random() - 0.5) * 120));
+      ny = Math.max(10, Math.min(areaH - 100, curTop + (Math.random() - 0.5) * 80));
+    }
+    m.el.style.left = nx + 'px';
+    m.el.style.top = ny + 'px';
+  }
+}
+setInterval(wander, 5000);
+
+/* ── Idle quotes ─────────────────────────────────── */
+function showIdleQuotes() {
+  for (const [pid, m] of mascots) {
+    const s = sessions.get(pid);
+    if (!s || s.status !== 'idle') continue;
+    if (permPending.has(pid) || compacting.has(pid) || stopMessages.has(pid)) continue;
+    if (m.idleBubbleActive) continue;
+    if (Math.random() > 0.3) continue; // don't show every tick
+
+    const bubble = m.el.querySelector('.mascot-bubble');
+    if (!bubble) continue;
+    const q = idleQuotes[Math.floor(Math.random() * idleQuotes.length)];
+    bubble.textContent = q;
+    bubble.style.borderColor = '';
+    bubble.classList.add('visible');
+    m.idleBubbleActive = true;
+    clearTimeout(m.idleQuoteTimeout);
+    m.idleQuoteTimeout = setTimeout(() => {
+      if (!permPending.has(pid) && !compacting.has(pid) && !stopMessages.has(pid)) {
+        bubble.classList.remove('visible');
+      }
+      m.idleBubbleActive = false;
+    }, 8000 + Math.random() * 5000);
+  }
+}
+setInterval(showIdleQuotes, 6000);
+
+/* ── Drag ────────────────────────────────────────── */
+function enableDrag(el) {
+  let dragging = false, sx, sy, ox, oy;
+  el.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    dragging = false; sx = e.clientX; sy = e.clientY;
+    ox = parseFloat(el.style.left) || 0; oy = parseFloat(el.style.top) || 0;
+    el.style.transition = 'none';
+    const onMove = e2 => {
+      const dx = e2.clientX - sx, dy = e2.clientY - sy;
+      if (!dragging && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) dragging = true;
+      if (dragging) { el.style.left = (ox + dx) + 'px'; el.style.top = (oy + dy) + 'px'; }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      el.style.transition = 'left 4s cubic-bezier(0.4,0,0.2,1), top 4s cubic-bezier(0.4,0,0.2,1)';
+      if (dragging) {
+        // Find mascot data and pause wander
+        for (const [, m] of mascots) {
+          if (m.el === el) { m.draggedUntil = Date.now() + 8000; break; }
+        }
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+/* ── Top bar buttons ─────────────────────────────── */
+let isTransparent = false;
+document.getElementById('btn-opacity')?.addEventListener('click', () => {
+  isTransparent = !isTransparent;
+  document.body.style.opacity = isTransparent ? '0.75' : '1';
+});
+
+document.getElementById('btn-open-main')?.addEventListener('click', () => {
+  window.open('/', '_blank');
+});
+
+/* ── Auto-resize window to mini size ─────────────── */
+(function autoResize() {
+  const TARGET_W = 420, TARGET_H = 340;
+  // Only resize if this page was opened as a popup (has an opener) or standalone
+  // and the current window is significantly larger than target
+  if (window.outerWidth > TARGET_W + 100 || window.outerHeight > TARGET_H + 100) {
+    try {
+      window.resizeTo(TARGET_W, TARGET_H);
+      // Move to bottom-right of screen
+      const sx = window.screen.availWidth;
+      const sy = window.screen.availHeight;
+      window.moveTo(sx - TARGET_W - 20, sy - TARGET_H - 40);
+    } catch (_) { /* blocked by browser — ignore */ }
+  }
+})();
+
+/* ── Start ───────────────────────────────────────── */
+connect();
+</script>
+</body>
+</html>

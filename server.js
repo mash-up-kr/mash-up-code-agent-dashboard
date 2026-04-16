@@ -20,7 +20,7 @@ const clients = new Set();  // SSE clients
 const sessionStats = new Map(); // pid -> { toolCounts, modifiedFiles, eventCount, thinkingStartTs }
 
 // ── Inactivity reaper ───────────────────────────
-const INACTIVE_TIMEOUT_MS = 20_000; // 20 seconds
+const INACTIVE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
 setInterval(() => {
   const now = Date.now();
@@ -388,6 +388,16 @@ function handleEvent(body) {
           stats.thinkingDuration += (ts - stats.thinkingStartTs);
           stats.thinkingStartTs = null;
         }
+      }
+      // Notify that Claude finished responding
+      if (sessions.has(pid)) {
+        const sess = sessions.get(pid);
+        broadcast('notification', {
+          type: 'stop',
+          title: '응답 완료',
+          message: `${sess.name} 세션이 응답을 완료했습니다`,
+          ts,
+        });
       }
       break;
     case 'agent_start':

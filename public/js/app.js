@@ -276,7 +276,7 @@ function appendEvent(e) {
     sessionCompacting.delete(e.pid);
     // Don't overwrite excited completion message from task completion
     if (!sessionStopMessage.has(e.pid)) {
-      const stopQuotes = ['끝! 다음은 뭐 할까?', '응답 완료~', '다 했어!', '자 이제 너 차례야~', '완료! 확인해봐~'];
+      const stopQuotes = ['끝! 다음 메시지 보내줘~', '응답 완료! 확인해봐~', '다 했어! 이어서 보내줘~', '입력 기다리는 중~', '완료! 확인하고 이어가자~'];
       sessionStopMessage.set(e.pid, { quote: stopQuotes[Math.floor(Math.random() * stopQuotes.length)], excited: false, ts: Date.now() });
     }
     const m = activeMascots.get(e.pid);
@@ -1936,4 +1936,253 @@ function startImageAnimation(element, images, interval = 600) {
     imageIndex = (imageIndex + 1) % images.length;
   }, interval);
   return imgInterval;
+}
+
+/* ══════════════════════════════════════════════════
+   Mini Window — Document PiP (primary) + fallback
+   ══════════════════════════════════════════════════ */
+let pipWindow = null;
+let pipSyncInterval = null;
+
+document.getElementById('btn-pip')?.addEventListener('click', async () => {
+  // Toggle off if already open
+  if (pipWindow && !pipWindow.closed) {
+    pipWindow.close();
+    cleanupPip();
+    return;
+  }
+
+  // Try Document PiP first (Chrome 116+)
+  if ('documentPictureInPicture' in window) {
+    try {
+      await openDocumentPip();
+      return;
+    } catch (e) {
+      console.warn('Document PiP failed, falling back to window.open:', e);
+    }
+  }
+
+  // Fallback: window.open to /mini.html
+  const w = 420, h = 340;
+  const left = Math.round(window.screenX + window.outerWidth - w - 30);
+  const top = Math.round(window.screenY + 60);
+  const win = window.open('/mini.html', 'mashong-mini', `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+  if (!win) showToast('팝업 차단', '팝업이 차단되었습니다. 주소창의 팝업 차단 아이콘에서 허용해주세요.');
+});
+
+function cleanupPip() {
+  clearInterval(pipSyncInterval);
+  pipSyncInterval = null;
+  pipWindow = null;
+}
+
+async function openDocumentPip() {
+  pipWindow = await documentPictureInPicture.requestWindow({
+    width: 380,
+    height: 320,
+  });
+
+  const doc = pipWindow.document;
+
+  // ── Styles ──
+  const style = doc.createElement('style');
+  style.textContent = `
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #0d0f18; color: #e3e1ec; font-family: 'Fira Code', monospace;
+      overflow: hidden; height: 100vh; position: relative;
+      background-image: radial-gradient(circle, #252838 1px, transparent 1px);
+      background-size: 24px 24px; user-select: none;
+    }
+    .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+    .mascot {
+      position: absolute; z-index: 5;
+      transition: left 4s cubic-bezier(0.4,0,0.2,1), top 4s cubic-bezier(0.4,0,0.2,1);
+      filter: drop-shadow(0 6px 16px rgba(96,70,255,0.15));
+    }
+    .mascot-img { width: 80px; height: auto; image-rendering: pixelated; display: block; animation: idle 3s ease-in-out infinite; }
+    @keyframes idle {
+      0%   { transform: translateY(0) scale(1) rotate(0deg); }
+      25%  { transform: translateY(-4px) scale(1.02) rotate(0.8deg); }
+      50%  { transform: translateY(2px) scale(1.01) rotate(-0.5deg); }
+      75%  { transform: translateY(-3px) scale(1.02) rotate(0.6deg); }
+      100% { transform: translateY(0) scale(1) rotate(0deg); }
+    }
+    @keyframes think { 0% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.05); } 100% { transform: translateY(0) scale(1); } }
+    @keyframes run {
+      0%   { transform: translateY(0) rotate(0deg) scale(1); }
+      15%  { transform: translateY(-8px) rotate(-3deg) scale(1.04); }
+      30%  { transform: translateY(0) rotate(2deg) scale(1); }
+      45%  { transform: translateY(-6px) rotate(-2deg) scale(1.03); }
+      60%  { transform: translateY(0) rotate(1deg) scale(1); }
+      100% { transform: translateY(0) rotate(0deg) scale(1); }
+    }
+    .mascot[data-status="idle"]     .mascot-img { animation-name: idle; animation-duration: 3s; }
+    .mascot[data-status="thinking"] .mascot-img { animation-name: think; animation-duration: 1.5s; }
+    .mascot[data-status="running"]  .mascot-img { animation-name: run; animation-duration: 1.2s; }
+    .bubble {
+      position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+      background: #13151f; border: 1px solid #6046ff40; border-radius: 6px;
+      padding: 2px 6px; font-size: 8px; color: #c6bfff;
+      white-space: nowrap; opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; z-index: 6; max-width: 160px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .bubble::after {
+      content: ''; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+      border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #6046ff40;
+    }
+    .bubble.visible { opacity: 1; }
+    .label {
+      text-align: center; font-size: 8px; color: #c6bfff;
+      background: rgba(96,70,255,0.12); border: 1px solid rgba(96,70,255,0.25);
+      border-radius: 3px; padding: 1px 6px; margin-top: 2px;
+      white-space: nowrap; width: fit-content; margin-left: auto; margin-right: auto;
+    }
+    .bar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: #13151fee; backdrop-filter: blur(8px);
+      border-top: 1px solid #252838; padding: 5px 10px;
+      display: flex; align-items: center; gap: 6px; z-index: 20;
+      flex-wrap: wrap; min-height: 26px;
+    }
+    .chip {
+      display: flex; align-items: center; gap: 4px;
+      background: #1c1f2e; border: 1px solid #252838; border-radius: 4px;
+      padding: 2px 6px; font-size: 8px;
+    }
+    .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .empty {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 26px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      opacity: 0.3; pointer-events: none;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    .pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+  `;
+  doc.head.appendChild(style);
+
+  // ── Body ──
+  doc.body.innerHTML = `
+    <div id="area" style="position:absolute;top:0;left:0;right:0;bottom:26px;overflow:hidden;"></div>
+    <div id="empty" class="empty">
+      <span class="material-symbols-outlined" style="font-size:28px;color:#6046ff;">pets</span>
+      <span style="font-size:9px;color:#474556;margin-top:4px;">세션 대기 중...</span>
+    </div>
+    <div id="bar" class="bar"><span style="font-size:8px;color:#474556;">연결 중...</span></div>
+  `;
+
+  const area = doc.getElementById('area');
+  const bar = doc.getElementById('bar');
+  const empty = doc.getElementById('empty');
+  const pipMascots = new Map();
+
+  // ── Sync loop — reads from parent page's state ──
+  function syncPip() {
+    if (!pipWindow || pipWindow.closed) { cleanupPip(); return; }
+
+    const aw = area.clientWidth || 360;
+    const ah = area.clientHeight || 260;
+
+    // Create / update mascots
+    for (const [pid, s] of sessions) {
+      if (s.status === 'ended') continue;
+
+      if (!pipMascots.has(pid)) {
+        const el = doc.createElement('div');
+        el.className = 'mascot';
+        el.setAttribute('data-status', s.status);
+        el.innerHTML = `<div class="bubble"></div>
+          <img src="/img/mascot-default.png" class="mascot-img" draggable="false">
+          <div class="label">${esc(s.name || pid)}</div>`;
+        el.style.left = (Math.random() * (aw - 100) + 10) + 'px';
+        el.style.top = (Math.random() * (ah - 100) + 10) + 'px';
+
+        const img = el.querySelector('.mascot-img');
+        const frames = ['/img/mascot-default.png', '/img/mascot-move.png'];
+        let fi = 0;
+        const imgInt = setInterval(() => {
+          if (pipWindow?.closed) return;
+          img.src = frames[fi]; fi = (fi + 1) % 2;
+        }, 600);
+
+        area.appendChild(el);
+        pipMascots.set(pid, { el, imgInt, wt: 0 });
+      }
+
+      const pm = pipMascots.get(pid);
+      pm.el.setAttribute('data-status', s.status);
+
+      // Mirror bubble from main window
+      const mainM = activeMascots.get(pid);
+      const pb = pm.el.querySelector('.bubble');
+      if (mainM && pb) {
+        const mb = mainM.el.querySelector('.mascot-bubble');
+        if (mb) {
+          pb.innerHTML = mb.innerHTML;
+          pb.className = 'bubble' + (mb.classList.contains('visible') ? ' visible' : '');
+          pb.style.borderColor = mb.style.borderColor;
+        }
+      }
+
+      // Wander
+      if (Date.now() - pm.wt > 5000) {
+        pm.wt = Date.now();
+        const cl = parseFloat(pm.el.style.left) || aw / 2;
+        const ct = parseFloat(pm.el.style.top) || ah / 2;
+        let nx, ny;
+        if (s.status === 'thinking') {
+          nx = Math.max(10, Math.min(aw - 100, cl + (Math.random() - 0.5) * 30));
+          ny = Math.max(10, Math.min(ah - 100, ct + (Math.random() - 0.5) * 20));
+        } else if (s.status === 'running') {
+          nx = Math.random() * (aw - 100) + 10;
+          ny = Math.random() * (ah - 100) + 10;
+        } else {
+          nx = Math.max(10, Math.min(aw - 100, cl + (Math.random() - 0.5) * 120));
+          ny = Math.max(10, Math.min(ah - 100, ct + (Math.random() - 0.5) * 80));
+        }
+        pm.el.style.left = nx + 'px';
+        pm.el.style.top = ny + 'px';
+      }
+    }
+
+    // Remove ended
+    for (const [pid, pm] of pipMascots) {
+      const s = sessions.get(pid);
+      if (!s || s.status === 'ended') {
+        pm.el.style.opacity = '0'; pm.el.style.transition = 'opacity 0.5s';
+        clearInterval(pm.imgInt);
+        setTimeout(() => { try { pm.el.remove(); } catch(_){} }, 500);
+        pipMascots.delete(pid);
+      }
+    }
+
+    empty.style.display = pipMascots.size > 0 ? 'none' : '';
+
+    // Status bar
+    const chips = [];
+    for (const [pid, s] of sessions) {
+      if (s.status === 'ended') continue;
+      const dc = { running:'#f59e0b', thinking:'#818cf8', idle:'#10b981', compacting:'#38bdf8' }[s.status] || '#10b981';
+      const lb = { running:'RUN', thinking:'THINK', idle:'IDLE', compacting:'COMPACT' }[s.status] || 'IDLE';
+      const lc = { running:'#fbbf24', thinking:'#a5b4fc', idle:'#34d399', compacting:'#7dd3fc' }[s.status] || '#34d399';
+      const pulse = (s.status === 'thinking' || s.status === 'running') ? ' pulse' : '';
+      const perm = sessionPermPending.has(pid) ? '<span style="color:#fb923c;font-size:7px;margin-left:2px" class="pulse">PERM</span>' : '';
+      chips.push(`<div class="chip"><span class="dot${pulse}" style="background:${dc}"></span>
+        <span style="color:#c6bfff;max-width:80px;overflow:hidden;text-overflow:ellipsis">${esc((s.name||pid).slice(0,14))}</span>
+        <span style="color:${lc};font-weight:bold;font-size:7px">${lb}</span>${perm}</div>`);
+    }
+    bar.innerHTML = chips.length > 0 ? chips.join('') : '<span style="font-size:8px;color:#474556">세션 없음</span>';
+  }
+
+  syncPip();
+  pipSyncInterval = setInterval(syncPip, 800);
+
+  pipWindow.addEventListener('pagehide', () => {
+    for (const pm of pipMascots.values()) clearInterval(pm.imgInt);
+    pipMascots.clear();
+    cleanupPip();
+  });
 }
