@@ -282,8 +282,11 @@ function appendEvent(e) {
     const m = activeMascots.get(e.pid);
     if (m) updateBubble(m, sessions.get(e.pid)?.status || 'idle');
   }
-  // Clear completion message when new activity starts
-  if ((e.type === 'thinking_start' || e.type === 'agent_start') && e.pid) {
+  // Clear completion message when new activity starts.
+  // thinking_start/agent_start aren't wired as hooks in Claude Code, so rely on
+  // the events we actually receive: pre_tool_use/tool_use/permission_request.
+  const activityEvents = ['thinking_start', 'agent_start', 'pre_tool_use', 'tool_use', 'permission_request'];
+  if (activityEvents.includes(e.type) && e.pid) {
     if (sessionStopMessage.has(e.pid)) {
       sessionStopMessage.delete(e.pid);
       const m = activeMascots.get(e.pid);

@@ -412,12 +412,21 @@ function handleEvent(body) {
       const preToolName = data?.tool_name || '';
       entry.toolName = preToolName;
       entry.toolDetail = getToolDetail(preToolName, data?.tool_input);
+      // Claude is actively working — override stale 'idle' from a prior Stop
+      if (sessions.has(pid)) {
+        const sess = sessions.get(pid);
+        if (sess.status === 'idle' || sess.status === 'ended') sess.status = 'running';
+      }
       break;
     }
     case 'tool_use': {
       const toolName = data?.tool_name || '';
       entry.toolName = toolName;
       entry.toolDetail = getToolDetail(toolName, data?.tool_input);
+      if (sessions.has(pid)) {
+        const sess = sessions.get(pid);
+        if (sess.status === 'idle' || sess.status === 'ended') sess.status = 'running';
+      }
 
       if (pid) {
         const stats = getSessionStats(pid);
