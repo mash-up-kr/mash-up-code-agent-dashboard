@@ -97,8 +97,26 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
    Chat Drawer Toggle
    ══════════════════════════════════════════════════ */
 const chatDrawer = document.getElementById('chat-drawer');
-document.getElementById('btn-chat-toggle')?.addEventListener('click', () => chatDrawer?.classList.toggle('closed'));
-document.getElementById('btn-chat-close')?.addEventListener('click', () => chatDrawer?.classList.add('closed'));
+const btnChatToggle = document.getElementById('btn-chat-toggle');
+const updateChatToggleStyle = () => {
+  const isClosed = chatDrawer?.classList.contains('closed');
+  if (isClosed) {
+    btnChatToggle?.classList.remove('text-[#6046ff]', 'bg-[#6046ff]/10');
+    btnChatToggle?.classList.add('text-slate-400');
+  } else {
+    btnChatToggle?.classList.remove('text-slate-400');
+    btnChatToggle?.classList.add('text-[#6046ff]', 'bg-[#6046ff]/10');
+  }
+};
+btnChatToggle?.addEventListener('click', () => {
+  chatDrawer?.classList.toggle('closed');
+  setTimeout(updateChatToggleStyle, 0);
+});
+document.getElementById('btn-chat-close')?.addEventListener('click', () => {
+  chatDrawer?.classList.add('closed');
+  updateChatToggleStyle();
+});
+updateChatToggleStyle();
 
 /* ══════════════════════════════════════════════════
    Render: Sidebar Sessions
