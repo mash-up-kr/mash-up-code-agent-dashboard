@@ -79,7 +79,7 @@
   </div>
 </header>
 
-<div class="flex flex-1 overflow-hidden">
+<div class="flex flex-1 min-h-0 overflow-hidden">
 
 <!-- ═══════════════════════════════════════════════ -->
 <!-- SideNavBar                                      -->
@@ -131,7 +131,7 @@
 <!-- ═══════════════════════════════════════════════ -->
 <!-- Main Content                                    -->
 <!-- ═══════════════════════════════════════════════ -->
-<main class="flex-1 flex flex-col bg-[#0a0b12] relative overflow-hidden">
+<main class="flex-1 min-h-0 flex flex-col bg-[#0a0b12] relative overflow-hidden">
 
   <!-- Tab bar -->
   <div class="h-12 bg-[#13151f] flex items-center px-6 gap-8 border-b border-[#252838]/30 flex-shrink-0">
@@ -145,8 +145,11 @@
     </button>
   </div>
 
+  <!-- View container (absolute-positioned panels for reliable scroll) -->
+  <div class="flex-1 min-h-0 relative">
+
   <!-- ─── View: 매숑이 작업실 ───────────────────── -->
-  <div id="view-workspace" class="view-panel flex-1 relative overflow-hidden bg-[#0d0f18] dot-grid">
+  <div id="view-workspace" class="view-panel absolute inset-0 overflow-hidden bg-[#0d0f18] dot-grid">
 
     <!-- Empty state -->
     <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-20" id="canvas-empty">
@@ -240,7 +243,7 @@
   </div>
 
 <!-- ─── View: 사용량 & 비용 ───────────────────── -->
-  <div id="view-dashboard" class="view-panel flex-1 overflow-y-auto p-8 hidden">
+  <div id="view-dashboard" class="view-panel absolute inset-0 overflow-y-auto p-8 hidden">
 
     <!-- Stat cards -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -373,6 +376,8 @@
       </div>
     </div>
   </div>
+
+  </div><!-- /View container -->
 
 </main>
 
