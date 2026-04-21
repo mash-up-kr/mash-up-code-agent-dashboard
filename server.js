@@ -134,6 +134,157 @@ function saveSession(pid) {
   } catch (_) { /* ignore write errors */ }
 }
 
+// Tokenize a single command piece into whitespace-separated tokens,
+// respecting quotes and escapes. Keeps original quoting in each token.
+function tokenizePiece(cmd) {
+  if (!cmd) return [];
+  const tokens = [];
+  let cur = '';
+  let q = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    const nx = cmd[i + 1];
+    if (q === '"') {
+      if (ch === '\\' && (nx === '"' || nx === '\\' || nx === '$' || nx === '`')) { cur += ch + nx; i++; continue; }
+      if (ch === '"') { q = null; cur += ch; continue; }
+      cur += ch; continue;
+    }
+    if (q === "'") {
+      if (ch === "'") { q = null; cur += ch; continue; }
+      cur += ch; continue;
+    }
+    if (ch === '\\') { cur += ch + (nx || ''); i++; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === ' ' || ch === '\t') {
+      if (cur) { tokens.push(cur); cur = ''; }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) tokens.push(cur);
+  return tokens;
+}
+
+// Commands where the second token is a subcommand (not a flag).
+const SUBCOMMAND_HOSTS = /^(git|npm|npx|yarn|pnpm|docker|kubectl|cargo|go|helm|bun|terraform|brew|apt|apt-get|systemctl|pm2)$/;
+
+// Normalize a command piece to its aggregation key: "cmd" or "cmd sub".
+// Strips env var prefixes like FOO=bar.
+function normalizeKey(piece) {
+  const tokens = tokenizePiece(piece);
+  if (tokens.length === 0) return '';
+  let idx = 0;
+  while (idx < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx])) idx++;
+  if (idx >= tokens.length) return tokens[0];
+  const cmd = tokens[idx];
+  if (idx + 1 < tokens.length && SUBCOMMAND_HOSTS.test(cmd) && !tokens[idx + 1].startsWith('-')) {
+    return cmd + ' ' + tokens[idx + 1];
+  }
+  return cmd;
+}
+
+// POSIX-ish utilities known to accept combined short flags (e.g. `ls -la`, `tar -xzf`).
+// Commands NOT in this set (find, xargs, gradle, awk, etc.) treat `-word` as an atomic flag.
+const COMBINED_SHORT_FLAGS_CMDS = new Set([
+  'ls', 'grep', 'egrep', 'fgrep', 'zgrep', 'tar', 'ps', 'chmod', 'chown',
+  'cp', 'mv', 'rm', 'mkdir', 'cat', 'head', 'tail', 'sort', 'uniq',
+  'wc', 'cut', 'tr', 'du', 'df', 'date', 'touch', 'ln', 'tee', 'diff',
+]);
+
+// Decompose a flag token into individual logical flags for counting.
+// For combined-short-flag commands: -abc → [-a, -b, -c].
+// For others (find, xargs, ...): -name stays as -name (atomic).
+// --foo=bar → [--foo] always.
+function splitShortFlags(flag, cmd) {
+  if (!flag || !flag.startsWith('-') || flag === '-' || flag === '--') return [flag];
+  if (flag.startsWith('--')) return [flag.split('=')[0]];
+  const body = flag.slice(1);
+  if (COMBINED_SHORT_FLAGS_CMDS.has(cmd) && /^[a-zA-Z]{2,}$/.test(body)) {
+    return body.split('').map(c => '-' + c);
+  }
+  // e.g. `-n5` on head/tail → just `-n`
+  if (COMBINED_SHORT_FLAGS_CMDS.has(cmd)) {
+    const m = body.match(/^([a-zA-Z])/);
+    if (m && m[1] !== body) return ['-' + m[1]];
+  }
+  return [flag];
+}
+
+// Categorize a bash command by its leading token.
+function categorizeCmd(cmd) {
+  if (/^git\s/.test(cmd)) return 'git';
+  if (/^(npm|npx|yarn|pnpm|bun)\s/.test(cmd)) return 'package';
+  if (/^(node|python|ruby|java|go|cargo|rustc)\s/.test(cmd)) return 'runtime';
+  if (/^(docker|kubectl|helm)\s/.test(cmd)) return 'infra';
+  if (/^(ls|cd|pwd|cat|head|tail|mkdir|rm|cp|mv|chmod|chown|find|grep|awk|sed|wc|sort|xargs|tar|zip|unzip|curl|wget)\b/.test(cmd)) return 'shell';
+  if (/^(make|cmake|gradle|mvn)\s/.test(cmd)) return 'build';
+  if (/test|spec|jest|vitest|pytest|mocha/.test(cmd)) return 'test';
+  if (/lint|eslint|prettier|fmt/.test(cmd)) return 'lint';
+  return 'other';
+}
+
+// Shell keywords / brackets that shouldn't appear as standalone pieces —
+// they're fragments of block constructs (for/while/if/case) that our
+// operator-based splitter breaks apart.
+const SHELL_FRAGMENTS = new Set([
+  'do', 'done', 'then', 'fi', 'else', 'elif', 'esac', ';;',
+  '{', '}', '(', ')', '[', ']', '[[', ']]',
+]);
+
+// Split a bash command by pipes, logical operators, and unquoted newlines.
+// Respects single/double quotes with bash escape rules, and parentheses/braces
+// (subshells & groups). Newlines inside quoted strings stay intact.
+function splitPipeline(raw) {
+  if (!raw) return [];
+  const parts = [];
+  let cur = '';
+  let quote = null;
+  let depth = 0;
+  const flush = () => {
+    const t = cur.trim();
+    if (!t) { cur = ''; return; }
+    if (t.startsWith('#')) { cur = ''; return; }
+    if (SHELL_FRAGMENTS.has(t)) { cur = ''; return; }
+    parts.push(t);
+    cur = '';
+  };
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const nx = raw[i + 1];
+
+    if (quote === '"') {
+      // In double quotes, backslash escapes only: \" \\ \$ \` \<newline>
+      if (ch === '\\' && (nx === '"' || nx === '\\' || nx === '$' || nx === '`' || nx === '\n')) {
+        cur += ch + nx; i++; continue;
+      }
+      if (ch === '"') { quote = null; cur += ch; continue; }
+      cur += ch; continue;
+    }
+    if (quote === "'") {
+      // In single quotes, nothing is escaped — only ' closes.
+      if (ch === "'") { quote = null; cur += ch; continue; }
+      cur += ch; continue;
+    }
+
+    // Outside any quote
+    if (ch === '\\') { cur += ch + (nx || ''); i++; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
+    if (ch === '(' || ch === '{') { depth++; cur += ch; continue; }
+    if (ch === ')' || ch === '}') { depth--; cur += ch; continue; }
+    if (depth > 0) { cur += ch; continue; }
+    // && || |& | ; \n — split outside quotes/groups
+    if ((ch === '&' && nx === '&') || (ch === '|' && (nx === '|' || nx === '&'))) {
+      flush(); i++; continue;
+    }
+    if (ch === '|' || ch === ';' || ch === '\n') {
+      flush(); continue;
+    }
+    cur += ch;
+  }
+  flush();
+  return parts;
+}
+
 function loadAllSavedSessions() {
   const results = [];
   try {
@@ -591,52 +742,122 @@ const server = http.createServer((req, res) => {
   // Bash commands (all sessions, all projects)
   if (pathname === '/api/bash-commands' && req.method === 'GET') {
     const saved = loadAllSavedSessions();
+    const now = Date.now();
+    const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const NEW_MAX_COUNT = 3;
     const allCmds = [];
+    const freq = {};
+
     for (const s of saved) {
+      const project = path.basename(s.cwd || '') || 'unknown';
       for (const c of (s.bashCommands || [])) {
-        allCmds.push({
-          command: c.command,
-          ts: c.ts,
-          project: path.basename(s.cwd || '') || 'unknown',
-          cwd: s.cwd,
-          sessionPid: s.pid,
-        });
+        const pieces = splitPipeline(c.command);
+        const isPipeline = pieces.length > 1;
+        for (const piece of pieces) {
+          const key = normalizeKey(piece);
+          if (!key) continue;
+          const tokens = tokenizePiece(piece);
+          const category = categorizeCmd(piece);
+
+          allCmds.push({
+            command: piece,
+            normalized: key,
+            original: isPipeline ? c.command : null,
+            ts: c.ts,
+            project,
+            category,
+            cwd: s.cwd,
+            sessionPid: s.pid,
+          });
+
+          if (!freq[key]) {
+            freq[key] = {
+              command: key,
+              category,
+              count: 0,
+              projects: new Set(),
+              examples: [],
+              firstTs: c.ts,
+              lastTs: c.ts,
+              coOccur: {},
+              flagCounts: {},
+              argCounts: {},
+            };
+          }
+          const f = freq[key];
+          f.count++;
+          f.projects.add(project);
+          if (c.ts < f.firstTs) f.firstTs = c.ts;
+          if (c.ts > f.lastTs) f.lastTs = c.ts;
+          if (isPipeline && f.examples.length < 3 && !f.examples.includes(c.command)) {
+            f.examples.push(c.command);
+          }
+          if (isPipeline) {
+            for (const sib of pieces) {
+              if (sib === piece) continue;
+              const sibKey = normalizeKey(sib);
+              if (sibKey) f.coOccur[sibKey] = (f.coOccur[sibKey] || 0) + 1;
+            }
+          }
+
+          // Flag / arg breakdown. Skip env prefixes, command, and subcommand tokens.
+          let start = 0;
+          while (start < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[start])) start++;
+          const headCmd = tokens[start] || '';
+          start++; // skip the command token
+          if (key.includes(' ')) start++; // skip the subcommand token
+          for (let i = start; i < tokens.length; i++) {
+            const t = tokens[i];
+            if (t.startsWith('-') && t.length > 1) {
+              for (const fl of splitShortFlags(t, headCmd)) {
+                f.flagCounts[fl] = (f.flagCounts[fl] || 0) + 1;
+              }
+            } else if (t.length > 0 && t.length <= 40) {
+              f.argCounts[t] = (f.argCounts[t] || 0) + 1;
+            }
+          }
+        }
       }
     }
-    // Sort newest first
+
+    // Annotate isNew on each recent piece (after freq is built)
+    for (const c of allCmds) {
+      const f = freq[c.normalized];
+      if (f && (now - f.firstTs) < NEW_WINDOW_MS && f.count <= NEW_MAX_COUNT) {
+        c.isNew = true;
+      }
+    }
+
+    // Sort recent newest first
     allCmds.sort((a, b) => b.ts - a.ts);
 
-    // Also build frequency map
-    const freq = {};
-    for (const c of allCmds) {
-      const normalized = c.command.split('\n')[0].trim().slice(0, 200);
-      if (!freq[normalized]) freq[normalized] = { command: normalized, count: 0, projects: new Set(), lastTs: 0 };
-      freq[normalized].count++;
-      freq[normalized].projects.add(c.project);
-      if (c.ts > freq[normalized].lastTs) freq[normalized].lastTs = c.ts;
-    }
-    const topCommands = Object.values(freq)
-      .map(f => ({ ...f, projects: [...f.projects] }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 50);
-
-    // Categorize
-    function categorize(cmd) {
-      if (/^git\s/.test(cmd)) return 'git';
-      if (/^(npm|npx|yarn|pnpm|bun)\s/.test(cmd)) return 'package';
-      if (/^(node|python|ruby|java|go|cargo|rustc)\s/.test(cmd)) return 'runtime';
-      if (/^(docker|kubectl|helm)\s/.test(cmd)) return 'infra';
-      if (/^(ls|cd|pwd|cat|head|tail|mkdir|rm|cp|mv|chmod|chown|find|grep|awk|sed|wc|sort|xargs|tar|zip|unzip|curl|wget)\b/.test(cmd)) return 'shell';
-      if (/^(make|cmake|gradle|mvn)\s/.test(cmd)) return 'build';
-      if (/test|spec|jest|vitest|pytest|mocha/.test(cmd)) return 'test';
-      if (/lint|eslint|prettier|fmt/.test(cmd)) return 'lint';
-      return 'other';
-    }
+    const topCommands = Object.values(freq).map(f => ({
+      command: f.command,
+      category: f.category,
+      count: f.count,
+      projects: [...f.projects],
+      examples: f.examples,
+      firstTs: f.firstTs,
+      lastTs: f.lastTs,
+      isNew: (now - f.firstTs) < NEW_WINDOW_MS && f.count <= NEW_MAX_COUNT,
+      coOccurrences: Object.entries(f.coOccur)
+        .map(([cmd, count]) => ({ cmd, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5),
+      topFlags: Object.entries(f.flagCounts)
+        .map(([flag, count]) => ({ flag, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10),
+      topArgs: Object.entries(f.argCounts)
+        .map(([arg, count]) => ({ arg, count }))
+        .filter(e => e.count >= 2) // drop one-offs — not informative
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8),
+    })).sort((a, b) => b.count - a.count).slice(0, 50);
 
     const categoryCounts = {};
     for (const c of allCmds) {
-      const cat = categorize(c.command);
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+      categoryCounts[c.category] = (categoryCounts[c.category] || 0) + 1;
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });

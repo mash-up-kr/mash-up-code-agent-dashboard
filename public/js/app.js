@@ -1149,7 +1149,8 @@ const categoryLabels = {
   other: { label: 'Other', color: 'bg-slate-500/20 text-slate-500' },
 };
 
-// Parse a bash command into colored tokens
+// Parse a bash command into colored tokens. Flag tokens get a title= tooltip
+// with a Korean description when one is registered in bash-flags.js.
 function parseBashTokens(raw) {
   // Take first line only
   const cmd = raw.split('\n')[0].trim();
@@ -1168,90 +1169,159 @@ function parseBashTokens(raw) {
   if (current) tokens.push(current);
   if (tokens.length === 0) return esc(cmd);
 
-  // Classify each token
+  const cmdName = tokens[0];
+  const hasSubcmd = tokens.length > 1
+    && /^(git|npm|npx|yarn|pnpm|docker|kubectl|cargo|go)$/.test(cmdName)
+    && !tokens[1].startsWith('-');
+  const subcmd = hasSubcmd ? tokens[1] : null;
+
+  const flagTip = (flag) => {
+    try {
+      const desc = window.lookupFlag ? window.lookupFlag(cmdName, subcmd, flag) : null;
+      return desc ? ` title="${esc(flag + ' — ' + desc)}"` : '';
+    } catch (_) { return ''; }
+  };
+
   return tokens.map((tok, i) => {
     const e = esc(tok);
-    // First token = command
     if (i === 0) return `<span class="text-emerald-400 font-bold">${e}</span>`;
-    // Subcommand (second token for git/npm/docker etc, if not a flag)
-    if (i === 1 && /^(git|npm|npx|yarn|pnpm|docker|kubectl|cargo|go)$/.test(tokens[0]) && !tok.startsWith('-'))
-      return `<span class="text-amber-400">${e}</span>`;
-    // Long flags --foo or --foo=bar
+    if (i === 1 && hasSubcmd) return `<span class="text-amber-400">${e}</span>`;
     if (tok.startsWith('--'))
-      return `<span class="text-sky-400">${e}</span>`;
-    // Short flags -x
+      return `<span class="text-sky-400 bash-flag"${flagTip(tok)}>${e}</span>`;
     if (/^-[a-zA-Z]/.test(tok))
-      return `<span class="text-sky-300">${e}</span>`;
-    // Pipe, redirect, logical operators
+      return `<span class="text-sky-300 bash-flag"${flagTip(tok)}>${e}</span>`;
     if (/^[|><&;]+$/.test(tok) || tok === '&&' || tok === '||')
       return `<span class="text-pink-400 font-bold">${e}</span>`;
-    // Paths (contains /)
     if (tok.includes('/'))
       return `<span class="text-violet-400">${e}</span>`;
-    // Glob patterns
     if (tok.includes('*') || tok.includes('?'))
       return `<span class="text-violet-300">${e}</span>`;
-    // Quoted strings
     if ((tok.startsWith('"') && tok.endsWith('"')) || (tok.startsWith("'") && tok.endsWith("'")))
       return `<span class="text-yellow-300">${e}</span>`;
-    // Default = argument
     return `<span class="text-slate-300">${e}</span>`;
   }).join(' ');
 }
 
+// Cache for filter re-renders
+let bashData = null;
+let bashFilter = { category: localStorage.getItem('bashFilterCategory') || null };
+
+function setBashFilter(cat) {
+  bashFilter.category = cat;
+  if (cat) localStorage.setItem('bashFilterCategory', cat);
+  else localStorage.removeItem('bashFilterCategory');
+  if (bashData) renderBashPanel(bashData);
+}
+
+function firstToken(cmd) {
+  const m = (cmd || '').trim().match(/^(\S+)/);
+  return m ? m[1] : '';
+}
+
 function renderBashPanel(data) {
-  if (!data) return;
-  const { recent, topCommands, categoryCounts, total } = data;
+  if (data) bashData = data;
+  if (!bashData) return;
+  const { recent, topCommands, categoryCounts, total } = bashData;
 
   const totalEl = document.getElementById('bash-total');
   if (totalEl) totalEl.textContent = total.toLocaleString();
 
-  // Categories — compact pills
+  // Categories — compact clickable pills
   const catEl = document.getElementById('bash-categories');
   if (catEl) {
     const catEntries = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]);
-    catEl.innerHTML = catEntries.map(([cat, count]) => {
+    const active = bashFilter.category;
+    const all = `<span class="bash-cat-pill ${active ? 'is-muted' : 'is-active'} bg-slate-500/20 text-slate-300 px-2 py-0.5 rounded text-[9px] font-bold" data-cat="">전체 ${total}</span>`;
+    const pills = catEntries.map(([cat, count]) => {
       const info = categoryLabels[cat] || categoryLabels.other;
-      return `<span class="${info.color} px-2 py-0.5 rounded text-[9px] font-bold">${info.label} ${count}</span>`;
+      const state = active ? (active === cat ? 'is-active' : 'is-muted') : '';
+      return `<span class="bash-cat-pill ${state} ${info.color} px-2 py-0.5 rounded text-[9px] font-bold" data-cat="${esc(cat)}">${info.label} ${count}</span>`;
     }).join('');
+    catEl.innerHTML = all + pills;
+    catEl.querySelectorAll('.bash-cat-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        const c = pill.getAttribute('data-cat') || null;
+        setBashFilter(c === bashFilter.category ? null : c);
+      });
+    });
   }
 
-  // Top commands
+  const matchesFilter = (c) => !bashFilter.category || c.category === bashFilter.category;
+
+  const exampleTitle = (cmd, examples) => {
+    const lines = [cmd];
+    if (examples && examples.length > 0) {
+      lines.push('', '실제 사용 예시:');
+      for (const ex of examples) lines.push('• ' + ex);
+    }
+    return esc(lines.join('\n'));
+  };
+
+  const newBadge = (isNew) => isNew ? `<span class="bash-new-badge" title="최근 7일 내 첫 등장">NEW</span>` : '';
+
+  // Top commands (filtered)
   const topEl = document.getElementById('bash-top-commands');
-  if (topEl && topCommands.length > 0) {
-    const maxCount = topCommands[0]?.count || 1;
-    topEl.innerHTML = topCommands.slice(0, 10).map(c => {
-      const pct = Math.max(5, (c.count / maxCount) * 100);
-      return `
-        <div class="px-3 py-2 border-b border-[#252838]/20 hover:bg-[#1c1f2e] transition-colors">
-          <div class="flex items-center gap-2 text-[10px]">
-            <code class="font-mono truncate flex-1" title="${esc(c.command)}">${parseBashTokens(c.command)}</code>
-            <span class="text-[#6046ff] font-mono font-bold flex-shrink-0">${c.count}x</span>
-          </div>
-          <div class="flex items-center gap-2 mt-0.5">
-            <div class="flex-1 h-1 bg-[#1c1f2e] rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500/50 rounded-full" style="width:${pct}%"></div>
+  if (topEl) {
+    const filtered = topCommands.filter(matchesFilter).slice(0, 10);
+    if (filtered.length === 0) {
+      topEl.innerHTML = `<div class="px-4 py-4 text-center text-slate-600 text-[10px]">일치하는 명령어가 없습니다</div>`;
+    } else {
+      const maxCount = filtered[0]?.count || 1;
+      topEl.innerHTML = filtered.map(c => {
+        const pct = Math.max(5, (c.count / maxCount) * 100);
+        const hasExamples = c.examples && c.examples.length > 0;
+        return `
+          <div class="bash-cmd-row px-3 py-2 border-b border-[#252838]/20 hover:bg-[#1c1f2e] transition-colors" data-cmd="${esc(c.command)}" title="${exampleTitle(c.command, c.examples)}">
+            <div class="flex items-center gap-2 text-[10px]">
+              <code class="font-mono truncate flex-1 bash-cmd-name">${parseBashTokens(c.command)}</code>
+              ${newBadge(c.isNew)}
+              ${hasExamples ? `<span class="material-symbols-outlined text-[12px] text-slate-600 flex-shrink-0" title="파이프라인 예시 ${c.examples.length}개">menu_book</span>` : ''}
+              <span class="text-[#6046ff] font-mono font-bold flex-shrink-0">${c.count}x</span>
             </div>
-            <span class="text-[8px] text-slate-600">${c.projects.join(', ')}</span>
-          </div>
-        </div>`;
-    }).join('');
+            <div class="flex items-center gap-2 mt-0.5">
+              <div class="flex-1 h-1 bg-[#1c1f2e] rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500/50 rounded-full" style="width:${pct}%"></div>
+              </div>
+              <span class="text-[8px] text-slate-600">${c.projects.join(', ')}</span>
+            </div>
+          </div>`;
+      }).join('');
+      topEl.querySelectorAll('.bash-cmd-row').forEach(row => {
+        row.addEventListener('click', () => {
+          showBashPopover(row.getAttribute('data-cmd'));
+        });
+      });
+    }
   }
 
-  // Recent commands
+  // Recent commands (filtered)
   const recentEl = document.getElementById('bash-recent');
-  if (recentEl && recent.length > 0) {
-    recentEl.innerHTML = recent.slice(0, 20).map(c => {
-      const time = new Date(c.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
-      return `
-        <div class="px-3 py-2 border-b border-[#252838]/20 hover:bg-[#1c1f2e] transition-colors">
-          <div class="flex items-center gap-2 text-[10px] mb-0.5">
-            <span class="text-slate-600 font-mono flex-shrink-0">${time}</span>
-            <span class="text-[#6046ff] text-[9px] flex-shrink-0">${esc(c.project)}</span>
-          </div>
-          <code class="block font-mono text-[10px] truncate" title="${esc(c.command)}">${parseBashTokens(c.command)}</code>
-        </div>`;
-    }).join('');
+  if (recentEl) {
+    const filtered = recent.filter(matchesFilter).slice(0, 20);
+    if (filtered.length === 0) {
+      recentEl.innerHTML = `<div class="px-4 py-4 text-center text-slate-600 text-[10px]">일치하는 기록이 없습니다</div>`;
+    } else {
+      recentEl.innerHTML = filtered.map(c => {
+        const time = new Date(c.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const examples = c.original ? [c.original] : [];
+        const popKey = c.normalized || c.command;
+        return `
+          <div class="bash-cmd-row px-3 py-2 border-b border-[#252838]/20 hover:bg-[#1c1f2e] transition-colors" data-cmd="${esc(popKey)}" title="${exampleTitle(c.command, examples)}">
+            <div class="flex items-center gap-2 text-[10px] mb-0.5">
+              <span class="text-slate-600 font-mono flex-shrink-0">${time}</span>
+              <span class="text-[#6046ff] text-[9px] flex-shrink-0">${esc(c.project)}</span>
+              ${newBadge(c.isNew)}
+              ${c.original ? `<span class="material-symbols-outlined text-[11px] text-slate-600 flex-shrink-0" title="파이프라인의 일부">alt_route</span>` : ''}
+            </div>
+            <code class="block font-mono text-[10px] truncate bash-cmd-name">${parseBashTokens(c.command)}</code>
+          </div>`;
+      }).join('');
+      recentEl.querySelectorAll('.bash-cmd-row').forEach(row => {
+        row.addEventListener('click', () => {
+          showBashPopover(row.getAttribute('data-cmd'));
+        });
+      });
+    }
   }
 }
 
@@ -1277,6 +1347,196 @@ document.getElementById('btn-bash-refresh')?.addEventListener('click', loadBashC
 // Load on startup
 loadBashCommands();
 setInterval(loadBashCommands, 30000);
+
+/* ══════════════════════════════════════════════════
+   Bash command popover — tldr + co-occurrence
+   ══════════════════════════════════════════════════ */
+function parseTldr(md) {
+  const lines = md.split('\n');
+  let title = '';
+  let summary = '';
+  const examples = [];
+  let currentDesc = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('# ')) { title = line.slice(2).trim(); continue; }
+    if (line.startsWith('> ')) {
+      const body = line.slice(2).trim();
+      if (/^more info[:：]/i.test(body)) continue;
+      summary = summary ? summary + ' ' + body : body;
+      continue;
+    }
+    if (line.startsWith('- ')) {
+      currentDesc = line.slice(2).replace(/:$/, '').trim();
+      continue;
+    }
+    if (line.startsWith('`') && line.endsWith('`') && currentDesc) {
+      const code = line.slice(1, -1).replace(/\{\{([^}]+)\}\}/g, '<$1>');
+      examples.push({ desc: currentDesc, code });
+      currentDesc = null;
+    }
+  }
+  return { title, summary, examples };
+}
+
+async function fetchTldr(cmd) {
+  const key = 'tldr:' + cmd;
+  const cached = localStorage.getItem(key);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      // Refresh in background if older than 7 days
+      if (parsed.fetchedAt && Date.now() - parsed.fetchedAt < 7 * 24 * 3600 * 1000) return parsed;
+    } catch (_) {}
+  }
+  const platforms = ['common', 'linux', 'osx'];
+  for (const p of platforms) {
+    try {
+      const url = `https://raw.githubusercontent.com/tldr-pages/tldr/main/pages/${p}/${encodeURIComponent(cmd)}.md`;
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const md = await r.text();
+      const parsed = parseTldr(md);
+      const result = { ok: true, platform: p, fetchedAt: Date.now(), ...parsed };
+      try { localStorage.setItem(key, JSON.stringify(result)); } catch (_) {}
+      return result;
+    } catch (_) { /* try next platform */ }
+  }
+  const result = { ok: false, fetchedAt: Date.now() };
+  try { localStorage.setItem(key, JSON.stringify(result)); } catch (_) {}
+  return result;
+}
+
+function showBashPopover(cmd) {
+  if (!cmd) return;
+  const el = document.getElementById('bash-popover');
+  const titleEl = document.getElementById('bash-popover-title');
+  const bodyEl = document.getElementById('bash-popover-body');
+  if (!el || !titleEl || !bodyEl) return;
+
+  titleEl.textContent = cmd;
+  el.classList.add('is-open');
+
+  const cmdName = firstToken(cmd);
+  const top = (bashData && bashData.topCommands) || [];
+  const match = top.find(t => t.command === cmd);
+  const coOccur = match?.coOccurrences || [];
+  const examples = match?.examples || [];
+  const topFlags = match?.topFlags || [];
+  const topArgs = match?.topArgs || [];
+  // Use subcommand for flag lookup if the key is "cmd sub"
+  const parts = cmd.split(/\s+/);
+  const subForLookup = parts.length > 1 ? parts[1] : null;
+
+  const exSection = examples.length > 0 ? `
+    <div>
+      <div class="bash-popover-section-title">
+        <span class="material-symbols-outlined text-[14px]">alt_route</span>
+        내가 쓴 파이프라인 예시
+      </div>
+      <div class="space-y-1">
+        ${examples.map(ex => `<div class="bash-tldr-example"><code>${parseBashTokens(ex)}</code></div>`).join('')}
+      </div>
+    </div>` : '';
+
+  const flagsSection = topFlags.length > 0 ? `
+    <div>
+      <div class="bash-popover-section-title">
+        <span class="material-symbols-outlined text-[14px]">flag</span>
+        자주 쓴 플래그
+      </div>
+      <div class="space-y-1">
+        ${topFlags.map(f => {
+          let desc = null;
+          try { desc = window.lookupFlag ? window.lookupFlag(cmdName, subForLookup, f.flag) : null; } catch (_) {}
+          return `
+            <div class="flex items-center gap-2 text-[11px] py-1 border-b border-[#252838]/20">
+              <code class="font-mono text-sky-400 font-bold flex-shrink-0 w-14">${esc(f.flag)}</code>
+              <span class="flex-1 text-slate-400 truncate">${desc ? esc(desc) : '<span class="text-slate-600 italic">설명 없음</span>'}</span>
+              <span class="text-[#6046ff] font-mono font-bold flex-shrink-0">${f.count}x</span>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  const argsSection = topArgs.length > 0 ? `
+    <div>
+      <div class="bash-popover-section-title">
+        <span class="material-symbols-outlined text-[14px]">data_object</span>
+        자주 쓴 인자
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        ${topArgs.map(a => `<span class="bash-cooccur-chip" style="background:rgba(139,92,246,0.1);border-color:rgba(139,92,246,0.3);color:#c4b5fd;">${esc(a.arg)} <span class="count">×${a.count}</span></span>`).join('')}
+      </div>
+    </div>` : '';
+
+  const coSection = `
+    <div>
+      <div class="bash-popover-section-title">
+        <span class="material-symbols-outlined text-[14px]">hub</span>
+        자주 함께 쓴 명령어
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        ${coOccur.length === 0
+          ? '<span class="text-[10px] text-slate-600">파이프라인에서 함께 쓰인 기록이 없습니다</span>'
+          : coOccur.map(c => `<span class="bash-cooccur-chip" data-co="${esc(c.cmd)}">${esc(c.cmd)} <span class="count">×${c.count}</span></span>`).join('')}
+      </div>
+    </div>`;
+
+  const tldrSection = `
+    <div>
+      <div class="bash-popover-section-title">
+        <span class="material-symbols-outlined text-[14px]">menu_book</span>
+        <span>tldr: ${esc(cmdName)}</span>
+        <span class="text-[9px] font-normal text-slate-600" id="bash-popover-tldr-src">로드 중…</span>
+      </div>
+      <div id="bash-popover-tldr"><div class="text-[10px] text-slate-600">불러오는 중…</div></div>
+    </div>`;
+
+  bodyEl.innerHTML = flagsSection + argsSection + exSection + coSection + tldrSection;
+
+  // Clicking a co-occurrence chip opens that command's popover (if present in top data)
+  bodyEl.querySelectorAll('.bash-cooccur-chip[data-co]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const name = chip.getAttribute('data-co');
+      if (!name) return;
+      const found = top.find(t => t.command === name) || top.find(t => firstToken(t.command) === name);
+      showBashPopover(found ? found.command : name);
+    });
+  });
+
+  // Fetch tldr asynchronously
+  fetchTldr(cmdName).then(result => {
+    if (titleEl.textContent !== cmd) return; // popover changed
+    const tldrEl = document.getElementById('bash-popover-tldr');
+    const srcEl = document.getElementById('bash-popover-tldr-src');
+    if (!tldrEl) return;
+    if (!result.ok) {
+      tldrEl.innerHTML = `<div class="text-[10px] text-slate-600">tldr 페이지를 찾을 수 없습니다. 터미널에서 <code class="text-slate-400">man ${esc(cmdName)}</code> 를 확인해보세요.</div>`;
+      if (srcEl) srcEl.textContent = '';
+      return;
+    }
+    if (srcEl) srcEl.textContent = `tldr-pages / ${result.platform}`;
+    const summary = result.summary ? `<div class="text-[11px] text-slate-300 mb-3 leading-relaxed">${esc(result.summary)}</div>` : '';
+    const ex = (result.examples || []).map(x => `
+      <div class="bash-tldr-example">
+        <div class="bash-tldr-desc">${esc(x.desc)}</div>
+        <code>${esc(x.code)}</code>
+      </div>`).join('');
+    tldrEl.innerHTML = summary + (ex || '<div class="text-[10px] text-slate-600">예시가 없습니다</div>');
+  });
+}
+
+document.getElementById('btn-bash-popover-close')?.addEventListener('click', () => {
+  document.getElementById('bash-popover')?.classList.remove('is-open');
+});
+document.getElementById('bash-popover')?.addEventListener('click', (e) => {
+  if (e.target.id === 'bash-popover') e.target.classList.remove('is-open');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.getElementById('bash-popover')?.classList.remove('is-open');
+});
 
 /* ══════════════════════════════════════════════════
    Tab data loading on switch

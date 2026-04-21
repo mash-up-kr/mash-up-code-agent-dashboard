@@ -189,6 +189,110 @@ body {
   animation: slide-in 0.3s ease-out;
 }
 
+/* ── Bash panel extras ───────────────────────── */
+.bash-cat-pill {
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s, opacity 0.1s;
+}
+.bash-cat-pill:hover { transform: translateY(-1px); }
+.bash-cat-pill.is-muted { opacity: 0.35; }
+.bash-cat-pill.is-active { box-shadow: 0 0 0 1.5px currentColor; }
+
+.bash-cmd-row {
+  cursor: pointer;
+}
+.bash-cmd-row .bash-cmd-name {
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.1s;
+}
+.bash-cmd-row:hover .bash-cmd-name {
+  border-bottom-color: rgba(96, 70, 255, 0.5);
+}
+
+.bash-new-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #f59e0b, #ef4444);
+  color: #fff;
+  animation: bash-new-pulse 1.8s ease-in-out infinite;
+  letter-spacing: 0.04em;
+}
+@keyframes bash-new-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
+
+.bash-flag {
+  cursor: help;
+  border-bottom: 1px dotted rgba(96, 165, 250, 0.4);
+}
+
+/* ── Bash popover (tldr + co-occurrence) ─────── */
+#bash-popover.is-open { display: flex !important; }
+.bash-popover-card {
+  animation: bash-popover-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes bash-popover-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.bash-popover-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #928ea2;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bash-tldr-example {
+  background: #0d0e15;
+  border: 1px solid #252838;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.bash-tldr-example .bash-tldr-desc {
+  font-size: 11px;
+  color: #c8c4d9;
+  margin-bottom: 6px;
+}
+.bash-tldr-example code {
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  color: #c6bfff;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.bash-cooccur-chip {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(96, 70, 255, 0.1);
+  border: 1px solid rgba(96, 70, 255, 0.3);
+  color: #c6bfff;
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  transition: background 0.1s;
+}
+.bash-cooccur-chip:hover { background: rgba(96, 70, 255, 0.2); }
+.bash-cooccur-chip .count {
+  color: #928ea2;
+  font-weight: 400;
+  font-size: 9px;
+}
+
 /* ── Tab active glow ─────────────────────────── */
 .tab-btn {
   position: relative;
