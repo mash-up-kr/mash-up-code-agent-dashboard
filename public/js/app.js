@@ -90,6 +90,24 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.view-panel').forEach(v => v.classList.add('hidden'));
     const target = document.getElementById('view-' + btn.dataset.tab);
     if (target) target.classList.remove('hidden');
+
+    // 커뮤니티 탭에서는 채팅 드로어 버튼 비활성화
+    const isCommunity = btn.dataset.tab === 'community';
+    const chatToggleBtn = document.getElementById('btn-chat-toggle');
+    if (chatToggleBtn) {
+      if (isCommunity) {
+        chatToggleBtn.disabled = true;
+        chatToggleBtn.classList.add('opacity-30', 'cursor-not-allowed');
+        chatToggleBtn.classList.remove('hover:bg-[#1c1f2e]');
+        // 드로어가 열려있으면 닫기
+        document.getElementById('chat-drawer')?.classList.add('closed');
+        updateChatToggleStyle();
+      } else {
+        chatToggleBtn.disabled = false;
+        chatToggleBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+        chatToggleBtn.classList.add('hover:bg-[#1c1f2e]');
+      }
+    }
   });
 });
 

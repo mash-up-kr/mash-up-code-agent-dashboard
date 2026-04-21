@@ -20,6 +20,16 @@ fi
 
 INPUT=$(cat 2>/dev/null || echo '{}')
 
+# Convert Claude Code PascalCase hook names to server-expected snake_case event names
+case "$EVENT_TYPE" in
+  PreToolUse)        EVENT_TYPE="pre_tool_use" ;;
+  PostToolUse)       EVENT_TYPE="tool_use" ;;
+  PermissionRequest) EVENT_TYPE="permission_request" ;;
+  Stop)              EVENT_TYPE="stop" ;;
+  PreCompact)        EVENT_TYPE="pre_compact" ;;
+  PostCompact)       EVENT_TYPE="post_compact" ;;
+esac
+
 # Extract Claude session_id from hook stdin — use as stable unique session identifier
 SID=$(echo "$INPUT" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
 SESSION_ID="${SID:-unknown}"
