@@ -103,6 +103,11 @@ function sendJson(res, status, body) {
 }
 
 async function readJsonBody(req) {
+  // If upstream middleware (e.g. express.json()) already parsed the body,
+  // just use it. Otherwise fall back to streaming the raw request.
+  if (req.body && typeof req.body === 'object') {
+    return req.body;
+  }
   return new Promise((resolve, reject) => {
     let raw = '';
     req.on('data', (chunk) => {
