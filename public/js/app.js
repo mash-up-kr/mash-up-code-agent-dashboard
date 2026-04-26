@@ -2497,18 +2497,129 @@ async function openDocumentPip() {
 }
 
 /* ══════════════════════════════════════════════════
+   Settings 드롭다운 & 로그아웃
+   ══════════════════════════════════════════════════ */
+document.getElementById('btn-settings')?.addEventListener('click', e => {
+  e.stopPropagation();
+  document.getElementById('settings-dropdown').classList.toggle('hidden');
+});
+
+document.addEventListener('click', () => {
+  document.getElementById('settings-dropdown')?.classList.add('hidden');
+});
+
+document.getElementById('btn-logout')?.addEventListener('click', async () => {
+  document.getElementById('settings-dropdown').classList.add('hidden');
+  const confirmed = await showConfirm('로그아웃 하시겠습니까?', '로그아웃');
+  if (!confirmed) return;
+
+  await fetch('/api/auth/logout', { method: 'POST' });
+  currentUser = null;
+  showCommunityGroups();
+  renderGroupCards([]);
+  openAuthModal('login');
+});
+
+/* ══════════════════════════════════════════════════
+   Community: 인증
+   ══════════════════════════════════════════════════ */
+let currentUser = null; // { memberId, username, name }
+
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (!res.ok) { currentUser = null; return false; }
+    currentUser = await res.json();
+    return true;
+  } catch (_) { currentUser = null; return false; }
+}
+
+function openAuthModal(tab = 'login') {
+  switchAuthTab(tab);
+  document.getElementById('modal-auth').classList.remove('hidden');
+  document.getElementById('modal-auth').classList.add('flex');
+}
+
+function closeAuthModal() {
+  document.getElementById('modal-auth').classList.add('hidden');
+  document.getElementById('modal-auth').classList.remove('flex');
+}
+
+function switchAuthTab(tab) {
+  const isLogin = tab === 'login';
+  document.getElementById('auth-form-login').classList.toggle('hidden', !isLogin);
+  document.getElementById('auth-form-register').classList.toggle('hidden', isLogin);
+  document.getElementById('auth-tab-login').className    = `flex-1 py-4 text-sm font-bold border-b-2 transition-colors cursor-pointer ${isLogin  ? 'text-[#6046ff] border-[#6046ff]' : 'text-slate-500 hover:text-slate-300 border-transparent'}`;
+  document.getElementById('auth-tab-register').className = `flex-1 py-4 text-sm font-bold border-b-2 transition-colors cursor-pointer ${!isLogin ? 'text-[#6046ff] border-[#6046ff]' : 'text-slate-500 hover:text-slate-300 border-transparent'}`;
+}
+
+document.getElementById('auth-tab-login')?.addEventListener('click', () => switchAuthTab('login'));
+document.getElementById('auth-tab-register')?.addEventListener('click', () => switchAuthTab('register'));
+
+document.getElementById('btn-login-submit')?.addEventListener('click', async () => {
+  const username = document.getElementById('input-login-username').value.trim();
+  const password = document.getElementById('input-login-password').value;
+  const errorEl  = document.getElementById('login-error');
+  const btn      = document.getElementById('btn-login-submit');
+
+  errorEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = '로그인 중...';
+
+  try {
+    const res  = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    currentUser = data;
+    closeAuthModal();
+    await refreshGroupList();
+  } catch (e) {
+    errorEl.textContent = e.message;
+    errorEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '로그인';
+  }
+});
+
+document.getElementById('btn-register-submit')?.addEventListener('click', async () => {
+  const username = document.getElementById('input-register-username').value.trim();
+  const password = document.getElementById('input-register-password').value;
+  const name     = document.getElementById('input-register-name').value.trim();
+  const errorEl  = document.getElementById('register-error');
+  const btn      = document.getElementById('btn-register-submit');
+
+  errorEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = '가입 중...';
+
+  try {
+    const res  = await fetch('/api/auth/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    currentUser = data;
+    closeAuthModal();
+    await refreshGroupList();
+  } catch (e) {
+    errorEl.textContent = e.message;
+    errorEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '회원가입';
+  }
+});
+
+/* ══════════════════════════════════════════════════
    Community: 그룹 목록 fetch & 렌더링
    ══════════════════════════════════════════════════ */
-const MEMBER_ID_KEY = 'community_member_id';
-
-function saveMemberId(id) {
-  localStorage.setItem(MEMBER_ID_KEY, String(id));
-}
-
-function getMemberId() {
-  return localStorage.getItem(MEMBER_ID_KEY) || '';
-}
-
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -2516,10 +2627,9 @@ function escapeHtml(str) {
 }
 
 async function fetchMyGroups() {
-  const memberId = getMemberId();
-  if (!memberId) return [];
   try {
-    const res = await fetch(`/api/community/groups?memberId=${memberId}`);
+    const res = await fetch('/api/community/groups');
+    if (res.status === 401) return null; // 미로그인
     if (!res.ok) return [];
     return await res.json();
   } catch (_) { return []; }
@@ -2543,7 +2653,7 @@ function renderGroupCards(groups) {
   }
 
   container.innerHTML = groups.map(g => `
-    <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors" data-group-id="${g.id}" data-group-code="${escapeHtml(g.code)}" data-group-name="${escapeHtml(g.name)}">
+    <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors" data-group-id="${g.id}" data-group-code="${escapeHtml(g.code)}" data-group-name="${escapeHtml(g.name)}" data-member-count="${g.memberCount}">
       <div class="flex-1 min-h-[80px]">
         <div class="flex items-start justify-between mb-3">
           <h3 class="text-base font-bold text-white leading-snug">${escapeHtml(g.name)}</h3>
@@ -2573,6 +2683,7 @@ function renderGroupCards(groups) {
 
 async function refreshGroupList() {
   const groups = await fetchMyGroups();
+  if (groups === null) { openAuthModal('login'); return; }
   renderGroupCards(groups);
 }
 
@@ -2591,10 +2702,11 @@ if (document.getElementById('view-community') && !document.getElementById('view-
 /* ══════════════════════════════════════════════════
    Community: 확인 다이얼로그
    ══════════════════════════════════════════════════ */
-function showConfirm(message) {
+function showConfirm(message, okLabel = '확인') {
   return new Promise(resolve => {
     const modal = document.getElementById('modal-confirm');
     document.getElementById('modal-confirm-message').textContent = message;
+    document.getElementById('btn-confirm-ok').textContent = okLabel;
     modal.classList.remove('hidden');
     modal.classList.add('flex');
 
@@ -2684,16 +2796,13 @@ document.getElementById('group-cards')?.addEventListener('click', async e => {
     const card      = leaveBtn.closest('[data-group-id]');
     const groupId   = Number(card.dataset.groupId);
     const groupName = card.dataset.groupName;
-    if (!await showConfirm(`"${groupName}" 그룹에서 나가시겠어요?`)) return;
-
-    const memberId = getMemberId();
-    if (!memberId) return;
+    if (!await showConfirm(`"${groupName}" 그룹에서 나가시겠어요?`, '나가기')) return;
 
     try {
       const res  = await fetch(`/api/community/groups/${groupId}/leave`, {
         method:  'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ memberId }),
+        body:    JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
@@ -2737,6 +2846,8 @@ function closeJoinGroupModal() {
   modalJoinGroup.classList.remove('flex');
 }
 
+let verifiedMemberCount = 0;
+
 document.getElementById('btn-group-join')?.addEventListener('click', openJoinGroupModal);
 document.getElementById('btn-join-modal-close')?.addEventListener('click', closeJoinGroupModal);
 modalJoinGroup?.addEventListener('click', e => {
@@ -2772,6 +2883,11 @@ document.getElementById('btn-join-verify')?.addEventListener('click', async () =
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
 
+    if (data.memberCount >= data.maxMembers) {
+      throw new Error('그룹 정원이 가득 찼습니다.');
+    }
+
+    verifiedMemberCount = data.memberCount;
     document.getElementById('join-group-name').textContent    = data.name;
     document.getElementById('join-group-members').textContent = `${data.memberCount}/${data.maxMembers} MEMBERS`;
     joinStepForm.classList.add('hidden');
@@ -2802,15 +2918,14 @@ document.getElementById('btn-join-confirm')?.addEventListener('click', async () 
     const res  = await fetch('/api/community/groups/join', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ code, nickname: document.getElementById('input-join-nickname').value.trim(), memberId: getMemberId() || undefined }),
+      body:    JSON.stringify({ code, nickname: document.getElementById('input-join-nickname').value.trim() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
 
-    saveMemberId(data.memberId);
     closeJoinGroupModal();
     await refreshGroupList();
-    showCommunityChat();
+    showCommunityChat(verifiedMemberCount + 1);
   } catch (e) {
     showToast('그룹 참여 실패', e.message, 'error');
     closeJoinGroupModal();
@@ -2844,10 +2959,16 @@ function closeCreateGroupModal() {
 
 document.getElementById('btn-group-create')?.addEventListener('click', openCreateGroupModal);
 
-document.getElementById('btn-modal-close')?.addEventListener('click', closeCreateGroupModal);
+document.getElementById('btn-modal-close')?.addEventListener('click', () => {
+  closeCreateGroupModal();
+  refreshGroupList();
+});
 
 modalCreateGroup?.addEventListener('click', e => {
-  if (e.target === modalCreateGroup) closeCreateGroupModal();
+  if (e.target === modalCreateGroup) {
+    closeCreateGroupModal();
+    refreshGroupList();
+  }
 });
 
 document.getElementById('btn-create-submit')?.addEventListener('click', async () => {
@@ -2869,12 +2990,11 @@ document.getElementById('btn-create-submit')?.addEventListener('click', async ()
     const res  = await fetch('/api/community/groups', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name: groupName, nickname, memberId: getMemberId() || undefined }),
+      body:    JSON.stringify({ name: groupName, nickname }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
 
-    saveMemberId(data.memberId);
     document.getElementById('created-group-name').textContent  = data.name;
     document.getElementById('invite-code-display').textContent = data.code;
     modalStepForm.classList.add('hidden');
@@ -2905,7 +3025,7 @@ document.getElementById('btn-copy-code')?.addEventListener('click', () => {
 document.getElementById('btn-enter-created-group')?.addEventListener('click', () => {
   closeCreateGroupModal();
   refreshGroupList();
-  showCommunityChat();
+  showCommunityChat(1);
 });
 
 /* ══════════════════════════════════════════════════
@@ -2916,12 +3036,28 @@ function showCommunityGroups() {
   document.getElementById('community-chat')?.classList.add('hidden');
 }
 
-function showCommunityChat() {
+function renderMemberGrid(memberCount) {
+  const grid = document.getElementById('member-grid');
+  if (!grid) return;
+  grid.innerHTML = Array.from({ length: memberCount }, () => `
+    <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
+      <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
+      <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
+    </div>`).join('');
+}
+
+function showCommunityChat(memberCount) {
   document.getElementById('community-groups')?.classList.add('hidden');
   document.getElementById('community-chat')?.classList.remove('hidden');
+  renderMemberGrid(memberCount ?? 1);
 }
 
 document.getElementById('view-community')?.addEventListener('click', e => {
-  if (e.target.closest('.btn-group-enter')) showCommunityChat();
+  const enterBtn = e.target.closest('.btn-group-enter');
+  if (enterBtn) {
+    const card = enterBtn.closest('[data-member-count]');
+    const memberCount = Number(card?.dataset.memberCount) || 1;
+    showCommunityChat(memberCount);
+  }
   if (e.target.closest('#btn-group-back')) showCommunityGroups();
 });

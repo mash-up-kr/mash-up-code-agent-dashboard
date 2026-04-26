@@ -72,9 +72,17 @@
       <button id="btn-chat-toggle" class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer" title="커뮤니티">
         <span class="material-symbols-outlined text-[20px]">forum</span>
       </button>
-      <button class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
-        <span class="material-symbols-outlined text-[20px]">settings</span>
-      </button>
+      <div class="relative">
+        <button id="btn-settings" class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">settings</span>
+        </button>
+        <div id="settings-dropdown" class="hidden absolute right-0 top-10 w-40 bg-[#1c1f2e] border border-[#252838] rounded-lg shadow-xl py-1 z-50">
+          <button id="btn-logout" class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-[#252838] hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">logout</span>
+            로그아웃
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -503,56 +511,7 @@
 
       <!-- User dashboard grid (right) -->
       <div class="flex-1 overflow-y-auto p-4 pl-0">
-        <div class="grid grid-cols-3 gap-3 h-full" style="grid-template-rows: repeat(4, minmax(0, 1fr));">
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-            <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-            <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-          </div>
-        </div>
+        <div id="member-grid" class="grid grid-cols-3 gap-3" style="grid-auto-rows: calc((100vh - 64px - 48px - 32px) / 4);"></div>
       </div>
 
     </div>
@@ -670,6 +629,57 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 로그인 / 회원가입                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-auth" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[420px] max-w-[90vw] shadow-2xl overflow-hidden">
+
+    <!-- Tabs -->
+    <div class="flex border-b border-[#252838]">
+      <button id="auth-tab-login" class="flex-1 py-4 text-sm font-bold text-[#6046ff] border-b-2 border-[#6046ff] transition-colors cursor-pointer">로그인</button>
+      <button id="auth-tab-register" class="flex-1 py-4 text-sm font-bold text-slate-500 hover:text-slate-300 border-b-2 border-transparent transition-colors cursor-pointer">회원가입</button>
+    </div>
+
+    <!-- 로그인 폼 -->
+    <div id="auth-form-login" class="p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">아이디</label>
+        <input id="input-login-username" type="text" placeholder="아이디 입력"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">비밀번호</label>
+        <input id="input-login-password" type="password" placeholder="비밀번호 입력"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <p id="login-error" class="text-xs text-red-400 hidden"></p>
+      <button id="btn-login-submit" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">로그인</button>
+    </div>
+
+    <!-- 회원가입 폼 -->
+    <div id="auth-form-register" class="p-6 space-y-4 hidden">
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">아이디</label>
+        <input id="input-register-username" type="text" placeholder="영문/숫자 조합"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">비밀번호</label>
+        <input id="input-register-password" type="password" placeholder="6자 이상"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">이름</label>
+        <input id="input-register-name" type="text" placeholder="실명 또는 닉네임"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <p id="register-error" class="text-xs text-red-400 hidden"></p>
+      <button id="btn-register-submit" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">회원가입</button>
+    </div>
+
+  </div>
+</div>
+
 <!-- Modal: 확인 다이얼로그                           -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="modal-confirm" class="fixed inset-0 z-[250] hidden items-center justify-center bg-black/70 backdrop-blur-sm">

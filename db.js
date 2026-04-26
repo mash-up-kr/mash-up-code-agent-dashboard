@@ -29,11 +29,23 @@ async function initDB() {
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS members (
-      id         INT          AUTO_INCREMENT PRIMARY KEY,
-      nickname   VARCHAR(50)  NOT NULL,
-      created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+      id            INT          AUTO_INCREMENT PRIMARY KEY,
+      username      VARCHAR(50)  NOT NULL UNIQUE,
+      password_hash VARCHAR(255) NOT NULL,
+      name          VARCHAR(50)  NOT NULL,
+      created_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  // 기존 테이블 마이그레이션
+  for (const sql of [
+    "ALTER TABLE members ADD COLUMN username VARCHAR(50) NOT NULL DEFAULT ''",
+    "ALTER TABLE members ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''",
+    "ALTER TABLE members ADD COLUMN name VARCHAR(50) NOT NULL DEFAULT ''",
+    "ALTER TABLE members ADD UNIQUE (username)",
+    "ALTER TABLE members DROP COLUMN nickname",
+  ]) {
+    try { await pool.execute(sql); } catch (_) {}
+  }
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS group_members (

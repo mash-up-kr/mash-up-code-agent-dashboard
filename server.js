@@ -5,8 +5,10 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { initDB } = require('./db');
+const session        = require('express-session');
+const { initDB }     = require('./db');
 const communityRouter = require('./routes/community');
+const authRouter      = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -635,6 +637,12 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10mb' }));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'mashup-dashboard-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 },
+}));
 
 // ── Routes ───────────────────────────────────────
 
@@ -796,6 +804,7 @@ app.get('/api/events', (req, res) => {
   res.json(events.slice(-100));
 });
 
+app.use('/api/auth', authRouter);
 app.use('/api/community', communityRouter);
 
 app.use(express.static(path.join(__dirname, 'public')));
