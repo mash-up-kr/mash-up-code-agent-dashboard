@@ -2485,3 +2485,167 @@ async function openDocumentPip() {
     cleanupPip();
   });
 }
+
+/* ══════════════════════════════════════════════════
+   Community: 그룹 참여 모달
+   ══════════════════════════════════════════════════ */
+const modalJoinGroup  = document.getElementById('modal-join-group');
+const joinStepForm    = document.getElementById('join-step-form');
+const joinStepConfirm = document.getElementById('join-step-confirm');
+
+// 더미 그룹 데이터 — 나중에 실제 API로 교체
+const DUMMY_GROUPS = {
+  'KQ7RMP2A': { name: '매숑이 파이썬 스터디',  members: '12/20' },
+  'ZT3NXVPQ': { name: 'UI/UX 리서치 그룹',     members: '5/10'  },
+  'BW9CDFR1': { name: '백엔드 보안 아키텍처',   members: '8/20'  },
+  'MH4YLSGE': { name: '빅데이터 분석 입문',     members: '15/30' },
+};
+
+function openJoinGroupModal() {
+  document.getElementById('input-invite-code').value = '';
+  document.getElementById('join-form-error').classList.add('hidden');
+  joinStepForm.classList.remove('hidden');
+  joinStepConfirm.classList.add('hidden');
+  modalJoinGroup.classList.remove('hidden');
+  modalJoinGroup.classList.add('flex');
+  document.getElementById('input-invite-code').focus();
+}
+
+function closeJoinGroupModal() {
+  modalJoinGroup.classList.add('hidden');
+  modalJoinGroup.classList.remove('flex');
+}
+
+document.getElementById('btn-group-join')?.addEventListener('click', openJoinGroupModal);
+document.getElementById('btn-join-modal-close')?.addEventListener('click', closeJoinGroupModal);
+modalJoinGroup?.addEventListener('click', e => {
+  if (e.target === modalJoinGroup) closeJoinGroupModal();
+});
+
+// 대문자 자동 변환
+document.getElementById('input-invite-code')?.addEventListener('input', e => {
+  e.target.value = e.target.value.toUpperCase();
+});
+
+document.getElementById('btn-join-verify')?.addEventListener('click', () => {
+  const code    = document.getElementById('input-invite-code').value.trim();
+  const errorEl = document.getElementById('join-form-error');
+  const group   = DUMMY_GROUPS[code];
+
+  if (!code || !group) {
+    errorEl.textContent = code ? '존재하지 않는 초대 코드예요.' : '초대 코드를 입력해주세요.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  errorEl.classList.add('hidden');
+
+  document.getElementById('join-group-name').textContent    = group.name;
+  document.getElementById('join-group-members').textContent = `${group.members} MEMBERS`;
+  joinStepForm.classList.add('hidden');
+  joinStepConfirm.classList.remove('hidden');
+});
+
+document.getElementById('btn-join-back')?.addEventListener('click', () => {
+  joinStepConfirm.classList.add('hidden');
+  joinStepForm.classList.remove('hidden');
+});
+
+document.getElementById('btn-join-confirm')?.addEventListener('click', () => {
+  closeJoinGroupModal();
+  showCommunityChat();
+});
+
+/* ══════════════════════════════════════════════════
+   Community: 그룹 생성 모달
+   ══════════════════════════════════════════════════ */
+const modalCreateGroup = document.getElementById('modal-create-group');
+const modalStepForm    = document.getElementById('modal-step-form');
+const modalStepDone    = document.getElementById('modal-step-done');
+
+function generateInviteCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+function openCreateGroupModal() {
+  // 폼 초기화
+  document.getElementById('input-group-name').value = '';
+  document.getElementById('input-nickname').value = '';
+  document.getElementById('modal-form-error').classList.add('hidden');
+  modalStepForm.classList.remove('hidden');
+  modalStepDone.classList.add('hidden');
+  modalCreateGroup.classList.remove('hidden');
+  modalCreateGroup.classList.add('flex');
+  document.getElementById('input-group-name').focus();
+}
+
+function closeCreateGroupModal() {
+  modalCreateGroup.classList.add('hidden');
+  modalCreateGroup.classList.remove('flex');
+}
+
+document.getElementById('btn-group-create')?.addEventListener('click', openCreateGroupModal);
+
+document.getElementById('btn-modal-close')?.addEventListener('click', closeCreateGroupModal);
+
+modalCreateGroup?.addEventListener('click', e => {
+  if (e.target === modalCreateGroup) closeCreateGroupModal();
+});
+
+document.getElementById('btn-create-submit')?.addEventListener('click', () => {
+  const groupName = document.getElementById('input-group-name').value.trim();
+  const nickname  = document.getElementById('input-nickname').value.trim();
+  const errorEl   = document.getElementById('modal-form-error');
+
+  if (!groupName || !nickname) {
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  errorEl.classList.add('hidden');
+
+  const code = generateInviteCode();
+  document.getElementById('created-group-name').textContent = groupName;
+  document.getElementById('invite-code-display').textContent = code;
+
+  modalStepForm.classList.add('hidden');
+  modalStepDone.classList.remove('hidden');
+});
+
+document.getElementById('btn-copy-code')?.addEventListener('click', () => {
+  const code = document.getElementById('invite-code-display').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    const btn = document.getElementById('btn-copy-code');
+    const original = btn.innerHTML;
+    btn.innerHTML = '<span class="material-symbols-outlined text-[16px]">check</span> 복사됨';
+    btn.classList.add('text-emerald-400', 'border-emerald-400/30', 'bg-emerald-400/10');
+    btn.classList.remove('text-[#6046ff]', 'border-[#6046ff]/30', 'bg-[#6046ff]/10');
+    setTimeout(() => {
+      btn.innerHTML = original;
+      btn.classList.remove('text-emerald-400', 'border-emerald-400/30', 'bg-emerald-400/10');
+      btn.classList.add('text-[#6046ff]', 'border-[#6046ff]/30', 'bg-[#6046ff]/10');
+    }, 2000);
+  });
+});
+
+document.getElementById('btn-enter-created-group')?.addEventListener('click', () => {
+  closeCreateGroupModal();
+  showCommunityChat();
+});
+
+/* ══════════════════════════════════════════════════
+   Community: 그룹 목록 ↔ 채팅 전환
+   ══════════════════════════════════════════════════ */
+function showCommunityGroups() {
+  document.getElementById('community-groups')?.classList.remove('hidden');
+  document.getElementById('community-chat')?.classList.add('hidden');
+}
+
+function showCommunityChat() {
+  document.getElementById('community-groups')?.classList.add('hidden');
+  document.getElementById('community-chat')?.classList.remove('hidden');
+}
+
+document.getElementById('view-community')?.addEventListener('click', e => {
+  if (e.target.closest('.btn-group-enter')) showCommunityChat();
+  if (e.target.closest('#btn-group-back')) showCommunityGroups();
+});
