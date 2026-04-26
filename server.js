@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 
-const http = require('http');
+require('dotenv').config();
+const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const session        = require('express-session');
+const { initDB }     = require('./db');
+const communityRouter = require('./routes/community');
+const authRouter      = require('./routes/auth');
 
+const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
 const DATA_DIR = path.join(__dirname, 'data');
 
-// Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 // In-memory state
@@ -41,11 +46,10 @@ setInterval(() => {
       setTimeout(() => sessions.delete(pid), 3000);
     }
   }
-}, 5000); // check every 5 seconds
+}, 5000);
 
 function getSessionStats(pid) {
   if (!sessionStats.has(pid)) {
-    // Try to load existing stats from disk
     let existing = null;
     try {
       const filePath = sessionFileName(pid);
@@ -104,7 +108,6 @@ function getToolDetail(toolName, input) {
 // ── Persistence ──────────────────────────────────
 
 function sessionFileName(pid) {
-  // Sanitize pid for filename
   const safe = String(pid).replace(/[^a-zA-Z0-9_-]/g, '_');
   return path.join(DATA_DIR, `session_${safe}.json`);
 }
@@ -134,8 +137,6 @@ function saveSession(pid) {
   } catch (_) { /* ignore write errors */ }
 }
 
-// Tokenize a single command piece into whitespace-separated tokens,
-// respecting quotes and escapes. Keeps original quoting in each token.
 function tokenizePiece(cmd) {
   if (!cmd) return [];
   const tokens = [];
@@ -165,11 +166,8 @@ function tokenizePiece(cmd) {
   return tokens;
 }
 
-// Commands where the second token is a subcommand (not a flag).
 const SUBCOMMAND_HOSTS = /^(git|npm|npx|yarn|pnpm|docker|kubectl|cargo|go|helm|bun|terraform|brew|apt|apt-get|systemctl|pm2)$/;
 
-// Normalize a command piece to its aggregation key: "cmd" or "cmd sub".
-// Strips env var prefixes like FOO=bar.
 function normalizeKey(piece) {
   const tokens = tokenizePiece(piece);
   if (tokens.length === 0) return '';
@@ -183,18 +181,12 @@ function normalizeKey(piece) {
   return cmd;
 }
 
-// POSIX-ish utilities known to accept combined short flags (e.g. `ls -la`, `tar -xzf`).
-// Commands NOT in this set (find, xargs, gradle, awk, etc.) treat `-word` as an atomic flag.
 const COMBINED_SHORT_FLAGS_CMDS = new Set([
   'ls', 'grep', 'egrep', 'fgrep', 'zgrep', 'tar', 'ps', 'chmod', 'chown',
   'cp', 'mv', 'rm', 'mkdir', 'cat', 'head', 'tail', 'sort', 'uniq',
   'wc', 'cut', 'tr', 'du', 'df', 'date', 'touch', 'ln', 'tee', 'diff',
 ]);
 
-// Decompose a flag token into individual logical flags for counting.
-// For combined-short-flag commands: -abc → [-a, -b, -c].
-// For others (find, xargs, ...): -name stays as -name (atomic).
-// --foo=bar → [--foo] always.
 function splitShortFlags(flag, cmd) {
   if (!flag || !flag.startsWith('-') || flag === '-' || flag === '--') return [flag];
   if (flag.startsWith('--')) return [flag.split('=')[0]];
@@ -202,7 +194,6 @@ function splitShortFlags(flag, cmd) {
   if (COMBINED_SHORT_FLAGS_CMDS.has(cmd) && /^[a-zA-Z]{2,}$/.test(body)) {
     return body.split('').map(c => '-' + c);
   }
-  // e.g. `-n5` on head/tail → just `-n`
   if (COMBINED_SHORT_FLAGS_CMDS.has(cmd)) {
     const m = body.match(/^([a-zA-Z])/);
     if (m && m[1] !== body) return ['-' + m[1]];
@@ -210,7 +201,6 @@ function splitShortFlags(flag, cmd) {
   return [flag];
 }
 
-// Categorize a bash command by its leading token.
 function categorizeCmd(cmd) {
   if (/^git\s/.test(cmd)) return 'git';
   if (/^(npm|npx|yarn|pnpm|bun)\s/.test(cmd)) return 'package';
@@ -223,17 +213,11 @@ function categorizeCmd(cmd) {
   return 'other';
 }
 
-// Shell keywords / brackets that shouldn't appear as standalone pieces —
-// they're fragments of block constructs (for/while/if/case) that our
-// operator-based splitter breaks apart.
 const SHELL_FRAGMENTS = new Set([
   'do', 'done', 'then', 'fi', 'else', 'elif', 'esac', ';;',
   '{', '}', '(', ')', '[', ']', '[[', ']]',
 ]);
 
-// Split a bash command by pipes, logical operators, and unquoted newlines.
-// Respects single/double quotes with bash escape rules, and parentheses/braces
-// (subshells & groups). Newlines inside quoted strings stay intact.
 function splitPipeline(raw) {
   if (!raw) return [];
   const parts = [];
@@ -253,7 +237,6 @@ function splitPipeline(raw) {
     const nx = raw[i + 1];
 
     if (quote === '"') {
-      // In double quotes, backslash escapes only: \" \\ \$ \` \<newline>
       if (ch === '\\' && (nx === '"' || nx === '\\' || nx === '$' || nx === '`' || nx === '\n')) {
         cur += ch + nx; i++; continue;
       }
@@ -261,18 +244,15 @@ function splitPipeline(raw) {
       cur += ch; continue;
     }
     if (quote === "'") {
-      // In single quotes, nothing is escaped — only ' closes.
       if (ch === "'") { quote = null; cur += ch; continue; }
       cur += ch; continue;
     }
 
-    // Outside any quote
     if (ch === '\\') { cur += ch + (nx || ''); i++; continue; }
     if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
     if (ch === '(' || ch === '{') { depth++; cur += ch; continue; }
     if (ch === ')' || ch === '}') { depth--; cur += ch; continue; }
     if (depth > 0) { cur += ch; continue; }
-    // && || |& | ; \n — split outside quotes/groups
     if ((ch === '&' && nx === '&') || (ch === '|' && (nx === '|' || nx === '&'))) {
       flush(); i++; continue;
     }
@@ -303,7 +283,6 @@ function loadAllSavedSessions() {
 
 function aggregateProjects() {
   const saved = loadAllSavedSessions();
-  // Group by cwd
   const byProject = {};
   for (const s of saved) {
     const cwd = s.cwd || 'unknown';
@@ -338,58 +317,47 @@ function aggregateProjects() {
     proj.totalEvents += (s.eventCount || 0);
     proj.totalThinkingDuration += (s.thinkingDuration || 0);
 
-    // Last activity
     const lastTs = s.endedAt || s.startedAt || 0;
     if (lastTs > proj.lastActivityTs) proj.lastActivityTs = lastTs;
 
-    // Duration
     if (s.startedAt && s.endedAt) {
       proj.totalDuration += (s.endedAt - s.startedAt);
     } else if (s.startedAt && s.status !== 'ended') {
-      // Still active — count from start to now
       proj.totalDuration += (Date.now() - s.startedAt);
     }
 
-    // Merge tool counts
     for (const [tool, count] of Object.entries(s.toolCounts || {})) {
       proj.toolCounts[tool] = (proj.toolCounts[tool] || 0) + count;
     }
 
-    // Merge modified files
     for (const [file, count] of Object.entries(s.modifiedFiles || {})) {
       proj.modifiedFiles[file] = (proj.modifiedFiles[file] || 0) + count;
     }
 
-    // Daily activity
     if (s.startedAt) {
       const day = new Date(s.startedAt).toISOString().slice(0, 10);
       proj.dailyActivity[day] = (proj.dailyActivity[day] || 0) + (s.eventCount || 0);
     }
 
-    // Hourly activity
     for (const [hour, count] of Object.entries(s.hourlyActivity || {})) {
       proj.hourlyActivity[hour] = (proj.hourlyActivity[hour] || 0) + count;
     }
 
-    // Aggregate tasks
     for (const t of (s.tasks || [])) {
       proj.tasks.push({ ...t, sessionName: s.name, sessionPid: s.pid });
     }
   }
 
-  // Sort sessions within each project (newest first) and limit modified files
   for (const proj of Object.values(byProject)) {
     proj.sessions.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-    proj.sessions = proj.sessions.slice(0, 20); // Keep last 20
+    proj.sessions = proj.sessions.slice(0, 20);
 
-    // Top 10 modified files
     const fileEntries = Object.entries(proj.modifiedFiles)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10);
     proj.topFiles = fileEntries.map(([file, count]) => ({ file, count }));
     delete proj.modifiedFiles;
 
-    // Deduplicate tasks by subject (keep the one with the latest status/timestamp)
     const taskMap = new Map();
     for (const t of proj.tasks) {
       const key = t.subject.trim().toLowerCase();
@@ -397,7 +365,6 @@ function aggregateProjects() {
       if (!existing) {
         taskMap.set(key, t);
       } else {
-        // Prefer the one with a more advanced status, or the newer one
         const statusRank = { completed: 3, in_progress: 2, pending: 1 };
         const eRank = statusRank[existing.status] || 0;
         const tRank = statusRank[t.status] || 0;
@@ -408,7 +375,6 @@ function aggregateProjects() {
     }
     proj.tasks = [...taskMap.values()];
 
-    // Auto-archive: remove completed tasks older than 24h from display
     const archiveCutoff = Date.now() - 24 * 60 * 60 * 1000;
     proj.archivedTaskCount = 0;
     proj.tasks = proj.tasks.filter(t => {
@@ -419,7 +385,6 @@ function aggregateProjects() {
       return true;
     });
 
-    // Sort: in_progress first, then pending, then completed; within group by newest
     const statusOrder = { in_progress: 0, pending: 1, completed: 2 };
     proj.tasks.sort((a, b) => {
       const oa = statusOrder[a.status] ?? 1, ob = statusOrder[b.status] ?? 1;
@@ -429,7 +394,6 @@ function aggregateProjects() {
     proj.tasks = proj.tasks.slice(0, 30);
   }
 
-  // Sort projects by most recent activity
   return Object.values(byProject).sort((a, b) => {
     const aLatest = a.sessions[0]?.startedAt || 0;
     const bLatest = b.sessions[0]?.startedAt || 0;
@@ -446,9 +410,7 @@ function handleEvent(body) {
 
   const entry = { type, pid, cwd, name, sid, ts };
 
-  // Auto-create session if first event arrives before session_start
   if (pid && !sessions.has(pid) && type !== 'session_end') {
-    // Preserve startedAt from existing saved session
     let savedStartedAt = null;
     try {
       const fp = sessionFileName(pid);
@@ -466,12 +428,10 @@ function handleEvent(body) {
     });
   }
 
-  // Update lastActivityAt on every event
   if (pid && sessions.has(pid)) {
     sessions.get(pid).lastActivityAt = ts;
   }
 
-  // Track stats
   if (pid) {
     const stats = getSessionStats(pid);
     stats.eventCount++;
@@ -481,7 +441,6 @@ function handleEvent(body) {
 
   switch (type) {
     case 'session_start': {
-      // Preserve startedAt from existing saved session
       let savedStart = null;
       try {
         const fp = sessionFileName(pid);
@@ -507,7 +466,6 @@ function handleEvent(body) {
         sess.endedAt = ts;
         const stats = getSessionStats(pid);
         saveSession(pid);
-        // Broadcast notification
         broadcast('notification', {
           type: 'session_end',
           title: '세션 완료',
@@ -540,7 +498,6 @@ function handleEvent(body) {
           stats.thinkingStartTs = null;
         }
       }
-      // Notify that Claude finished responding
       if (sessions.has(pid)) {
         const sess = sessions.get(pid);
         broadcast('notification', {
@@ -559,11 +516,9 @@ function handleEvent(body) {
       if (sessions.has(pid)) sessions.get(pid).status = 'idle';
       break;
     case 'pre_tool_use': {
-      // Pre-tool: only set entry metadata for the event broadcast, no stat tracking
       const preToolName = data?.tool_name || '';
       entry.toolName = preToolName;
       entry.toolDetail = getToolDetail(preToolName, data?.tool_input);
-      // Claude is actively working — override stale 'idle' from a prior Stop
       if (sessions.has(pid)) {
         const sess = sessions.get(pid);
         if (sess.status === 'idle' || sess.status === 'ended') sess.status = 'running';
@@ -583,13 +538,11 @@ function handleEvent(body) {
         const stats = getSessionStats(pid);
         stats.toolCounts[toolName] = (stats.toolCounts[toolName] || 0) + 1;
 
-        // Track modified files
         if (['Write', 'Edit'].includes(toolName) && data?.tool_input?.file_path) {
           const filePath = data.tool_input.file_path;
           stats.modifiedFiles[filePath] = (stats.modifiedFiles[filePath] || 0) + 1;
         }
 
-        // Track bash commands
         if (toolName === 'Bash' && data?.tool_input?.command) {
           const cmd = data.tool_input.command.trim();
           if (cmd && stats.bashCommands.length < 500) {
@@ -597,7 +550,6 @@ function handleEvent(body) {
           }
         }
 
-        // Track tasks
         if (toolName === 'TaskCreate' && data?.tool_input?.subject) {
           if (!stats.tasks) stats.tasks = [];
           const newTaskId = String(stats.tasks.length + 1);
@@ -608,11 +560,10 @@ function handleEvent(body) {
             status: 'pending',
             createdAt: ts,
           });
-          // Cap: keep max 50 tasks per session, prune oldest completed first
           if (stats.tasks.length > 50) {
             const completedIdx = stats.tasks.findIndex(t => t.status === 'completed');
             if (completedIdx !== -1) stats.tasks.splice(completedIdx, 1);
-            else stats.tasks.shift(); // no completed left, drop oldest
+            else stats.tasks.shift();
           }
         }
         if (toolName === 'TaskUpdate' && data?.tool_input) {
@@ -620,25 +571,19 @@ function handleEvent(body) {
           const taskId = data.tool_input.taskId;
           const newStatus = data.tool_input.status;
           if (newStatus && stats.tasks.length > 0) {
-            // Global taskId doesn't match session-local array index.
-            // Strategy: try session-local 1-based index, stored taskId, then
-            // fallback to matching the most recent task with a different status.
             const idx = parseInt(taskId) - 1;
             let matched = false;
 
-            // 1) Exact session-local index (only if within range)
             if (idx >= 0 && idx < stats.tasks.length) {
               stats.tasks[idx].status = newStatus;
               matched = true;
             }
 
-            // 2) Search by stored taskId
             if (!matched) {
               const t = stats.tasks.find(t => t.taskId === taskId);
               if (t) { t.status = newStatus; matched = true; }
             }
 
-            // 3) Fallback: update the oldest non-completed task (FIFO order)
             if (!matched) {
               for (let i = 0; i < stats.tasks.length; i++) {
                 if (stats.tasks[i].status !== 'completed' && stats.tasks[i].status !== newStatus) {
@@ -663,7 +608,6 @@ function handleEvent(body) {
       const toolName = data?.tool_name || '';
       entry.toolName = toolName;
       entry.toolDetail = getToolDetail(toolName, data?.tool_input);
-      // Broadcast notification so the dashboard can alert the user
       const sessName = sessions.has(pid) ? sessions.get(pid).name : pid;
       broadcast('notification', {
         title: '승인 대기',
@@ -675,7 +619,6 @@ function handleEvent(body) {
     }
   }
 
-  // Periodically save session stats
   if (pid && sessions.has(pid) && (type === 'tool_use' || type === 'permission_request' || type === 'post_compact')) {
     saveSession(pid);
   }
@@ -686,222 +629,195 @@ function handleEvent(body) {
   addEvent(entry);
 }
 
-// ── HTTP Server ──────────────────────────────────
+// ── Middleware ───────────────────────────────────
 
-const MIME = {
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.js': 'application/javascript',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.json': 'application/json',
-};
-
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
-  const { pathname } = url;
-
+app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+app.use(express.json({ limit: '10mb' }));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'mashup-dashboard-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 },
+}));
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    return res.end();
-  }
+// ── Routes ───────────────────────────────────────
 
-  // SSE stream
-  if (pathname === '/api/stream') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write('event: connected\ndata: {}\n\n');
-    res.write(`event: init\ndata: ${JSON.stringify({ sessions: [...sessions.values()], events })}\n\n`);
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
-    return;
-  }
+app.get('/api/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('event: connected\ndata: {}\n\n');
+  res.write(`event: init\ndata: ${JSON.stringify({ sessions: [...sessions.values()], events })}\n\n`);
+  clients.add(res);
+  req.on('close', () => clients.delete(res));
+});
 
-  // Sessions list
-  if (pathname === '/api/sessions' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify([...sessions.values()]));
-  }
+app.get('/api/sessions', (req, res) => {
+  res.json([...sessions.values()]);
+});
 
-  // Project aggregation
-  if (pathname === '/api/projects' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(aggregateProjects()));
-  }
+app.get('/api/projects', (req, res) => {
+  res.json(aggregateProjects());
+});
 
-  // Bash commands (all sessions, all projects)
-  if (pathname === '/api/bash-commands' && req.method === 'GET') {
-    const saved = loadAllSavedSessions();
-    const now = Date.now();
-    const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-    const NEW_MAX_COUNT = 3;
-    const allCmds = [];
-    const freq = {};
+app.get('/api/bash-commands', (req, res) => {
+  const saved = loadAllSavedSessions();
+  const now = Date.now();
+  const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const NEW_MAX_COUNT = 3;
+  const allCmds = [];
+  const freq = {};
 
-    for (const s of saved) {
-      const project = path.basename(s.cwd || '') || 'unknown';
-      for (const c of (s.bashCommands || [])) {
-        const pieces = splitPipeline(c.command);
-        const isPipeline = pieces.length > 1;
-        for (const piece of pieces) {
-          const key = normalizeKey(piece);
-          if (!key) continue;
-          const tokens = tokenizePiece(piece);
-          const category = categorizeCmd(piece);
+  for (const s of saved) {
+    const project = path.basename(s.cwd || '') || 'unknown';
+    for (const c of (s.bashCommands || [])) {
+      const pieces = splitPipeline(c.command);
+      const isPipeline = pieces.length > 1;
+      for (const piece of pieces) {
+        const key = normalizeKey(piece);
+        if (!key) continue;
+        const tokens = tokenizePiece(piece);
+        const category = categorizeCmd(piece);
 
-          allCmds.push({
-            command: piece,
-            normalized: key,
-            original: isPipeline ? c.command : null,
-            ts: c.ts,
-            project,
+        allCmds.push({
+          command: piece,
+          normalized: key,
+          original: isPipeline ? c.command : null,
+          ts: c.ts,
+          project,
+          category,
+          cwd: s.cwd,
+          sessionPid: s.pid,
+        });
+
+        if (!freq[key]) {
+          freq[key] = {
+            command: key,
             category,
-            cwd: s.cwd,
-            sessionPid: s.pid,
-          });
+            count: 0,
+            projects: new Set(),
+            examples: [],
+            firstTs: c.ts,
+            lastTs: c.ts,
+            coOccur: {},
+            flagCounts: {},
+            argCounts: {},
+          };
+        }
+        const f = freq[key];
+        f.count++;
+        f.projects.add(project);
+        if (c.ts < f.firstTs) f.firstTs = c.ts;
+        if (c.ts > f.lastTs) f.lastTs = c.ts;
+        if (isPipeline && f.examples.length < 3 && !f.examples.includes(c.command)) {
+          f.examples.push(c.command);
+        }
+        if (isPipeline) {
+          for (const sib of pieces) {
+            if (sib === piece) continue;
+            const sibKey = normalizeKey(sib);
+            if (sibKey) f.coOccur[sibKey] = (f.coOccur[sibKey] || 0) + 1;
+          }
+        }
 
-          if (!freq[key]) {
-            freq[key] = {
-              command: key,
-              category,
-              count: 0,
-              projects: new Set(),
-              examples: [],
-              firstTs: c.ts,
-              lastTs: c.ts,
-              coOccur: {},
-              flagCounts: {},
-              argCounts: {},
-            };
-          }
-          const f = freq[key];
-          f.count++;
-          f.projects.add(project);
-          if (c.ts < f.firstTs) f.firstTs = c.ts;
-          if (c.ts > f.lastTs) f.lastTs = c.ts;
-          if (isPipeline && f.examples.length < 3 && !f.examples.includes(c.command)) {
-            f.examples.push(c.command);
-          }
-          if (isPipeline) {
-            for (const sib of pieces) {
-              if (sib === piece) continue;
-              const sibKey = normalizeKey(sib);
-              if (sibKey) f.coOccur[sibKey] = (f.coOccur[sibKey] || 0) + 1;
+        let start = 0;
+        while (start < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[start])) start++;
+        const headCmd = tokens[start] || '';
+        start++;
+        if (key.includes(' ')) start++;
+        for (let i = start; i < tokens.length; i++) {
+          const t = tokens[i];
+          if (t.startsWith('-') && t.length > 1) {
+            for (const fl of splitShortFlags(t, headCmd)) {
+              f.flagCounts[fl] = (f.flagCounts[fl] || 0) + 1;
             }
-          }
-
-          // Flag / arg breakdown. Skip env prefixes, command, and subcommand tokens.
-          let start = 0;
-          while (start < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[start])) start++;
-          const headCmd = tokens[start] || '';
-          start++; // skip the command token
-          if (key.includes(' ')) start++; // skip the subcommand token
-          for (let i = start; i < tokens.length; i++) {
-            const t = tokens[i];
-            if (t.startsWith('-') && t.length > 1) {
-              for (const fl of splitShortFlags(t, headCmd)) {
-                f.flagCounts[fl] = (f.flagCounts[fl] || 0) + 1;
-              }
-            } else if (t.length > 0 && t.length <= 40) {
-              f.argCounts[t] = (f.argCounts[t] || 0) + 1;
-            }
+          } else if (t.length > 0 && t.length <= 40) {
+            f.argCounts[t] = (f.argCounts[t] || 0) + 1;
           }
         }
       }
     }
+  }
 
-    // Annotate isNew on each recent piece (after freq is built)
-    for (const c of allCmds) {
-      const f = freq[c.normalized];
-      if (f && (now - f.firstTs) < NEW_WINDOW_MS && f.count <= NEW_MAX_COUNT) {
-        c.isNew = true;
-      }
+  for (const c of allCmds) {
+    const f = freq[c.normalized];
+    if (f && (now - f.firstTs) < NEW_WINDOW_MS && f.count <= NEW_MAX_COUNT) {
+      c.isNew = true;
     }
-
-    // Sort recent newest first
-    allCmds.sort((a, b) => b.ts - a.ts);
-
-    const topCommands = Object.values(freq).map(f => ({
-      command: f.command,
-      category: f.category,
-      count: f.count,
-      projects: [...f.projects],
-      examples: f.examples,
-      firstTs: f.firstTs,
-      lastTs: f.lastTs,
-      isNew: (now - f.firstTs) < NEW_WINDOW_MS && f.count <= NEW_MAX_COUNT,
-      coOccurrences: Object.entries(f.coOccur)
-        .map(([cmd, count]) => ({ cmd, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5),
-      topFlags: Object.entries(f.flagCounts)
-        .map(([flag, count]) => ({ flag, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10),
-      topArgs: Object.entries(f.argCounts)
-        .map(([arg, count]) => ({ arg, count }))
-        .filter(e => e.count >= 2) // drop one-offs — not informative
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 8),
-    })).sort((a, b) => b.count - a.count).slice(0, 50);
-
-    const categoryCounts = {};
-    for (const c of allCmds) {
-      categoryCounts[c.category] = (categoryCounts[c.category] || 0) + 1;
-    }
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({
-      recent: allCmds.slice(0, 100),
-      topCommands,
-      categoryCounts,
-      total: allCmds.length,
-    }));
   }
 
-  // Event ingestion (from hook-handler.sh)
-  if (pathname === '/api/events' && req.method === 'POST') {
-    let raw = '';
-    req.on('data', c => (raw += c));
-    req.on('end', () => {
-      try {
-        handleEvent(JSON.parse(raw));
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"ok":true}');
-      } catch (e) {
-        res.writeHead(400);
-        res.end(`{"error":"${e.message}"}`);
-      }
-    });
-    return;
+  allCmds.sort((a, b) => b.ts - a.ts);
+
+  const topCommands = Object.values(freq).map(f => ({
+    command: f.command,
+    category: f.category,
+    count: f.count,
+    projects: [...f.projects],
+    examples: f.examples,
+    firstTs: f.firstTs,
+    lastTs: f.lastTs,
+    isNew: (now - f.firstTs) < NEW_WINDOW_MS && f.count <= NEW_MAX_COUNT,
+    coOccurrences: Object.entries(f.coOccur)
+      .map(([cmd, count]) => ({ cmd, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+    topFlags: Object.entries(f.flagCounts)
+      .map(([flag, count]) => ({ flag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10),
+    topArgs: Object.entries(f.argCounts)
+      .map(([arg, count]) => ({ arg, count }))
+      .filter(e => e.count >= 2)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8),
+  })).sort((a, b) => b.count - a.count).slice(0, 50);
+
+  const categoryCounts = {};
+  for (const c of allCmds) {
+    categoryCounts[c.category] = (categoryCounts[c.category] || 0) + 1;
   }
 
-  // Recent events (for debug)
-  if (pathname === '/api/events' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(events.slice(-100)));
-  }
-
-  // Static files
-  const filePath = path.join(__dirname, 'public', pathname === '/' ? 'index.html' : pathname);
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); return res.end('Not found'); }
-    const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' });
-    res.end(data);
+  res.json({
+    recent: allCmds.slice(0, 100),
+    topCommands,
+    categoryCounts,
+    total: allCmds.length,
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
+app.post('/api/events', (req, res) => {
+  try {
+    handleEvent(req.body);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
+
+app.get('/api/events', (req, res) => {
+  res.json(events.slice(-100));
+});
+
+app.use('/api/auth', authRouter);
+app.use('/api/community', communityRouter);
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ── Start ────────────────────────────────────────
+
+initDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('DB 초기화 실패:', err.message);
+    process.exit(1);
+  });

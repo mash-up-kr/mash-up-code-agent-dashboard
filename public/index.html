@@ -72,9 +72,17 @@
       <button id="btn-chat-toggle" class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer" title="커뮤니티">
         <span class="material-symbols-outlined text-[20px]">forum</span>
       </button>
-      <button class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
-        <span class="material-symbols-outlined text-[20px]">settings</span>
-      </button>
+      <div class="relative">
+        <button id="btn-settings" class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">settings</span>
+        </button>
+        <div id="settings-dropdown" class="hidden absolute right-0 top-10 w-40 bg-[#1c1f2e] border border-[#252838] rounded-lg shadow-xl py-1 z-50">
+          <button id="btn-logout" class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-[#252838] hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">logout</span>
+            로그아웃
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -382,135 +390,130 @@
   </div>
 
   <!-- ─── View: 커뮤니티 ───────────────────────── -->
-  <div id="view-community" class="view-panel absolute inset-0 overflow-hidden hidden flex">
+  <div id="view-community" class="view-panel absolute inset-0 overflow-hidden hidden">
 
-    <!-- Chat window (left) -->
-    <div class="w-96 flex-shrink-0 flex flex-col p-4">
-      <div class="flex-1 flex flex-col bg-[#13151f] border border-[#252838] rounded-xl overflow-hidden">
+    <!-- Sub-view: 그룹 목록 (기본) -->
+    <div id="community-groups" class="absolute inset-0 overflow-y-auto p-8">
 
-        <!-- Header -->
-        <div class="p-4 border-b border-[#252838]/50 flex items-center gap-2 flex-shrink-0">
-          <span class="material-symbols-outlined text-[#6046ff] text-lg">chat_bubble</span>
-          <span class="text-sm font-bold text-slate-200 uppercase tracking-widest">Communication Hub</span>
+      <!-- Header -->
+      <div class="flex items-start justify-between mb-10">
+        <div>
+          <div class="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-2">Community</div>
+          <h1 class="text-3xl font-bold text-white mb-3">커뮤니티</h1>
+          <p class="text-sm text-slate-400 leading-relaxed max-w-md">
+            매숑이들과 연결하고 AI 사용 현황을 공유하세요.<br>
+            현재 활성화된 노드 및 그룹 목록입니다.
+          </p>
         </div>
-
-        <!-- Messages -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-          <div class="flex gap-3">
-            <div class="w-8 h-8 rounded bg-[#c6bfff]/10 flex-shrink-0 flex items-center justify-center border border-[#c6bfff]/20">
-              <span class="material-symbols-outlined text-[#c6bfff] text-lg">account_circle</span>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-baseline justify-between mb-1">
-                <span class="font-bold text-slate-300 font-mono">dev_kim</span>
-                <span class="text-[9px] text-slate-500">14:22:05</span>
-              </div>
-              <div class="bg-[#1c1f2e] p-2.5 rounded border border-[#252838] text-slate-400 leading-relaxed">
-                ALPHA-01 인스턴스에서 메모리 누수 감지됨. 점검 부탁드려요.
-              </div>
-            </div>
-          </div>
-          <div class="flex gap-3">
-            <div class="w-8 h-8 rounded bg-[#68fcbf]/10 flex-shrink-0 flex items-center justify-center border border-[#68fcbf]/20">
-              <span class="material-symbols-outlined text-[#68fcbf] text-lg">person_search</span>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-baseline justify-between mb-1">
-                <span class="font-bold text-slate-300 font-mono">mace_01</span>
-                <span class="text-[9px] text-slate-500">14:25:12</span>
-              </div>
-              <div class="bg-[#1c1f2e] p-2.5 rounded border border-[#252838] text-slate-400 leading-relaxed">
-                확인했습니다. Logic-Parser 에이전트 재시작하겠습니다.
-              </div>
-            </div>
-          </div>
-          <div class="py-2 flex items-center gap-2 px-1">
-            <div class="h-px flex-1 bg-gradient-to-r from-transparent via-[#252838] to-transparent"></div>
-            <span class="text-[9px] font-mono text-slate-600 uppercase">System Event</span>
-            <div class="h-px flex-1 bg-gradient-to-r from-transparent via-[#252838] to-transparent"></div>
-          </div>
-          <div class="flex gap-3">
-            <div class="w-8 h-8 rounded bg-[#6046ff]/10 flex-shrink-0 flex items-center justify-center border border-[#6046ff]/20">
-              <span class="material-symbols-outlined text-[#6046ff] text-lg">smart_toy</span>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-baseline justify-between mb-1">
-                <span class="font-bold text-[#c6bfff] font-mono">system_bot</span>
-                <span class="text-[9px] text-slate-500">14:26:01</span>
-              </div>
-              <div class="bg-[#6046ff]/5 p-2.5 rounded border border-[#6046ff]/20 text-slate-300 leading-relaxed shadow-[inset_0_0_8px_rgba(96,70,255,0.05)]">
-                Agent [Logic-Parser] restarted successfully.
-              </div>
-            </div>
-          </div>
+        <div class="flex items-center gap-3 flex-shrink-0 mt-2">
+          <button id="btn-group-join" class="flex items-center gap-2 px-4 py-2.5 border border-[#252838] rounded-lg text-sm text-slate-300 hover:border-[#6046ff]/50 hover:text-white transition-colors cursor-pointer">
+            <span class="material-symbols-outlined text-[18px]">add_circle</span>
+            그룹 참여하기
+          </button>
+          <button id="btn-group-create" class="flex items-center gap-2 px-5 py-2.5 bg-[#6046ff] rounded-lg text-sm text-white font-bold hover:bg-[#725bff] transition-colors cursor-pointer">
+            <span class="material-symbols-outlined text-[18px]">add_box</span>
+            그룹 생성하기
+          </button>
         </div>
+      </div>
 
-        <!-- Input -->
-        <div class="p-4 border-t border-[#252838]/50 flex-shrink-0">
-          <div class="relative flex items-center">
-            <input type="text" class="w-full bg-[#1c1f2e] border-[#252838] rounded-lg pl-3 pr-10 py-2.5 text-xs text-slate-300 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono" placeholder="Type command or message...">
-            <button class="absolute right-2 text-[#6046ff] hover:text-[#725bff] transition-colors p-1 cursor-pointer">
-              <span class="material-symbols-outlined text-[18px]">send</span>
-            </button>
-          </div>
+      <!-- 내 그룹 목록 -->
+      <div>
+        <div class="flex items-center gap-3 mb-5">
+          <span class="text-base font-bold text-slate-200">내 그룹 목록</span>
+          <span id="my-groups-count" class="text-[11px] font-mono font-bold text-[#6046ff] bg-[#6046ff]/10 border border-[#6046ff]/30 px-2 py-0.5 rounded">0_ACTIVE</span>
         </div>
-
+        <div id="group-cards" class="grid grid-cols-4 gap-4">
+          <!-- JS로 동적 렌더링 -->
+        </div>
       </div>
     </div>
 
-    <!-- User dashboard grid (right) -->
-    <div class="flex-1 overflow-y-auto p-4 pl-0">
-      <div class="grid grid-cols-3 gap-3 h-full" style="grid-template-rows: repeat(4, minmax(0, 1fr));">
-        <!-- 12 user dashboard cells (3 cols x 4 rows) -->
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-        </div>
-        <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-          <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-          <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
+    <!-- Sub-view: 채팅 (그룹 진입 후) -->
+    <div id="community-chat" class="absolute inset-0 hidden flex">
+
+      <!-- Chat window (left) -->
+      <div class="w-96 flex-shrink-0 flex flex-col p-4">
+        <div class="flex-1 flex flex-col bg-[#13151f] border border-[#252838] rounded-xl overflow-hidden">
+
+          <!-- Header -->
+          <div class="p-4 border-b border-[#252838]/50 flex items-center gap-2 flex-shrink-0">
+            <button id="btn-group-back" class="text-slate-500 hover:text-slate-300 transition-colors mr-1 cursor-pointer">
+              <span class="material-symbols-outlined text-[20px]">arrow_back</span>
+            </button>
+            <span class="material-symbols-outlined text-[#6046ff] text-lg">chat_bubble</span>
+            <span class="text-sm font-bold text-slate-200 uppercase tracking-widest">Communication Hub</span>
+          </div>
+
+          <!-- Messages -->
+          <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            <div class="flex gap-3">
+              <div class="w-8 h-8 rounded bg-[#c6bfff]/10 flex-shrink-0 flex items-center justify-center border border-[#c6bfff]/20">
+                <span class="material-symbols-outlined text-[#c6bfff] text-lg">account_circle</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="font-bold text-slate-300 font-mono">dev_kim</span>
+                  <span class="text-[9px] text-slate-500">14:22:05</span>
+                </div>
+                <div class="bg-[#1c1f2e] p-2.5 rounded border border-[#252838] text-slate-400 leading-relaxed">
+                  ALPHA-01 인스턴스에서 메모리 누수 감지됨. 점검 부탁드려요.
+                </div>
+              </div>
+            </div>
+            <div class="flex gap-3">
+              <div class="w-8 h-8 rounded bg-[#68fcbf]/10 flex-shrink-0 flex items-center justify-center border border-[#68fcbf]/20">
+                <span class="material-symbols-outlined text-[#68fcbf] text-lg">person_search</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="font-bold text-slate-300 font-mono">mace_01</span>
+                  <span class="text-[9px] text-slate-500">14:25:12</span>
+                </div>
+                <div class="bg-[#1c1f2e] p-2.5 rounded border border-[#252838] text-slate-400 leading-relaxed">
+                  확인했습니다. Logic-Parser 에이전트 재시작하겠습니다.
+                </div>
+              </div>
+            </div>
+            <div class="py-2 flex items-center gap-2 px-1">
+              <div class="h-px flex-1 bg-gradient-to-r from-transparent via-[#252838] to-transparent"></div>
+              <span class="text-[9px] font-mono text-slate-600 uppercase">System Event</span>
+              <div class="h-px flex-1 bg-gradient-to-r from-transparent via-[#252838] to-transparent"></div>
+            </div>
+            <div class="flex gap-3">
+              <div class="w-8 h-8 rounded bg-[#6046ff]/10 flex-shrink-0 flex items-center justify-center border border-[#6046ff]/20">
+                <span class="material-symbols-outlined text-[#6046ff] text-lg">smart_toy</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline justify-between mb-1">
+                  <span class="font-bold text-[#c6bfff] font-mono">system_bot</span>
+                  <span class="text-[9px] text-slate-500">14:26:01</span>
+                </div>
+                <div class="bg-[#6046ff]/5 p-2.5 rounded border border-[#6046ff]/20 text-slate-300 leading-relaxed shadow-[inset_0_0_8px_rgba(96,70,255,0.05)]">
+                  Agent [Logic-Parser] restarted successfully.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Input -->
+          <div class="p-4 border-t border-[#252838]/50 flex-shrink-0">
+            <div class="relative flex items-center">
+              <input type="text" class="w-full bg-[#1c1f2e] border-[#252838] rounded-lg pl-3 pr-10 py-2.5 text-xs text-slate-300 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono" placeholder="Type command or message...">
+              <button class="absolute right-2 text-[#6046ff] hover:text-[#725bff] transition-colors p-1 cursor-pointer">
+                <span class="material-symbols-outlined text-[18px]">send</span>
+              </button>
+            </div>
+          </div>
+
         </div>
       </div>
+
+      <!-- User dashboard grid (right) -->
+      <div class="flex-1 overflow-y-auto p-4 pl-0">
+        <div id="member-grid" class="grid grid-cols-3 gap-3" style="grid-auto-rows: calc((100vh - 64px - 48px - 32px) / 4);"></div>
+      </div>
+
     </div>
 
   </div>
@@ -607,7 +610,7 @@
 </div>
 
 <!-- Notification toasts -->
-<div id="toast-container" class="fixed top-20 right-6 z-[100] space-y-2 pointer-events-none"></div>
+<div id="toast-container" class="fixed top-20 right-6 z-[300] space-y-2 pointer-events-none"></div>
 
 <!-- Bash command popover (tldr + co-occurrence) -->
 <div id="bash-popover" class="fixed inset-0 z-[110] hidden items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -622,6 +625,256 @@
       </button>
     </div>
     <div class="flex-1 overflow-y-auto p-5 space-y-5" id="bash-popover-body"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 로그인 / 회원가입                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-auth" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[420px] max-w-[90vw] shadow-2xl overflow-hidden">
+
+    <!-- Tabs -->
+    <div class="flex border-b border-[#252838]">
+      <button id="auth-tab-login" class="flex-1 py-4 text-sm font-bold text-[#6046ff] border-b-2 border-[#6046ff] transition-colors cursor-pointer">로그인</button>
+      <button id="auth-tab-register" class="flex-1 py-4 text-sm font-bold text-slate-500 hover:text-slate-300 border-b-2 border-transparent transition-colors cursor-pointer">회원가입</button>
+    </div>
+
+    <!-- 로그인 폼 -->
+    <div id="auth-form-login" class="p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">아이디</label>
+        <input id="input-login-username" type="text" placeholder="아이디 입력"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">비밀번호</label>
+        <input id="input-login-password" type="password" placeholder="비밀번호 입력"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <p id="login-error" class="text-xs text-red-400 hidden"></p>
+      <button id="btn-login-submit" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">로그인</button>
+    </div>
+
+    <!-- 회원가입 폼 -->
+    <div id="auth-form-register" class="p-6 space-y-4 hidden">
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">아이디</label>
+        <input id="input-register-username" type="text" placeholder="영문/숫자 조합"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">비밀번호</label>
+        <input id="input-register-password" type="password" placeholder="6자 이상"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">이름</label>
+        <input id="input-register-name" type="text" placeholder="실명 또는 닉네임"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors">
+      </div>
+      <p id="register-error" class="text-xs text-red-400 hidden"></p>
+      <button id="btn-register-submit" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">회원가입</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal: 확인 다이얼로그                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-confirm" class="fixed inset-0 z-[250] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[360px] max-w-[90vw] shadow-2xl p-6 space-y-5">
+    <div class="flex items-center gap-3">
+      <span class="material-symbols-outlined text-amber-400 text-2xl" style="font-variation-settings:'FILL' 1">warning</span>
+      <p id="modal-confirm-message" class="text-sm text-slate-200 leading-relaxed"></p>
+    </div>
+    <div class="flex gap-3">
+      <button id="btn-confirm-cancel" class="flex-1 py-2.5 border border-[#252838] hover:border-[#474556] text-slate-400 hover:text-slate-200 font-bold text-sm rounded-lg transition-colors cursor-pointer">취소</button>
+      <button id="btn-confirm-ok" class="flex-1 py-2.5 bg-red-500/80 hover:bg-red-500 text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">나가기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 그룹 참여하기                            -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-join-group" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[440px] max-w-[90vw] shadow-2xl overflow-hidden">
+
+    <!-- Modal Header -->
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[#252838]">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[#6046ff] text-xl">group</span>
+        <span class="text-base font-bold text-white">그룹 참여하기</span>
+      </div>
+      <button id="btn-join-modal-close" class="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-1">
+        <span class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+
+    <!-- Step 1: 초대 코드 입력 -->
+    <div id="join-step-form" class="p-6 space-y-5">
+      <p class="text-sm text-slate-400 leading-relaxed">팀원에게 받은 초대 코드를 입력하면 그룹에 참여할 수 있어요.</p>
+      <div>
+        <label for="input-invite-code" class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">초대 코드</label>
+        <input
+          id="input-invite-code"
+          type="text"
+          maxlength="8"
+          placeholder="8자리 코드 입력 (예: KQ7RMP2A)"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono tracking-widest uppercase transition-colors"
+        >
+      </div>
+      <div>
+        <label for="input-join-nickname" class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">닉네임</label>
+        <input
+          id="input-join-nickname"
+          type="text"
+          maxlength="50"
+          placeholder="이 그룹에서 사용할 닉네임"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors"
+        >
+      </div>
+      <p id="join-form-error" class="text-xs text-red-400 hidden">유효한 초대 코드를 입력해주세요.</p>
+      <button id="btn-join-verify" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">
+        코드 확인
+      </button>
+    </div>
+
+    <!-- Step 2: 그룹 컨펌 -->
+    <div id="join-step-confirm" class="p-6 hidden space-y-5">
+      <p class="text-sm text-slate-400">아래 그룹에 참여하시겠어요?</p>
+
+      <!-- Group preview card -->
+      <div class="bg-[#0d0f18] border border-[#252838] rounded-xl p-5 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-[#6046ff]/15 border border-[#6046ff]/30 flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-[#6046ff] text-2xl">groups</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p id="join-group-name" class="text-base font-bold text-white truncate"></p>
+          <div class="flex items-center gap-1.5 mt-1 text-xs text-slate-500">
+            <span class="material-symbols-outlined text-[13px]">group</span>
+            <span id="join-group-members" class="font-mono"></span>
+          </div>
+        </div>
+        <span class="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-1 rounded flex-shrink-0">ACTIVE</span>
+      </div>
+
+      <div class="flex gap-3">
+        <button id="btn-join-back" class="flex-1 py-3 border border-[#252838] hover:border-[#474556] text-slate-400 hover:text-slate-200 font-bold text-sm rounded-lg transition-colors cursor-pointer">
+          뒤로
+        </button>
+        <button id="btn-join-confirm" class="flex-1 py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">
+          참여하기
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 초대 코드 확인                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-view-code" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[400px] max-w-[90vw] shadow-2xl overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[#252838]">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[#6046ff] text-xl">key</span>
+        <span class="text-base font-bold text-white">초대 코드</span>
+      </div>
+      <button id="btn-view-code-close" class="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-1">
+        <span class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <div class="p-6">
+      <p id="view-code-group-name" class="text-sm text-slate-400 mb-4"></p>
+      <div class="bg-[#0d0f18] border border-[#252838] rounded-xl p-4">
+        <p class="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-3">Invite Code</p>
+        <div class="flex items-center gap-3">
+          <code id="view-code-display" class="flex-1 text-2xl font-mono font-bold text-[#c6bfff] tracking-[0.2em]"></code>
+          <button id="btn-view-code-copy" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#6046ff]/10 border border-[#6046ff]/30 rounded-lg text-xs font-bold text-[#6046ff] hover:bg-[#6046ff]/20 transition-colors cursor-pointer flex-shrink-0">
+            <span class="material-symbols-outlined text-[16px]">content_copy</span>
+            복사
+          </button>
+        </div>
+        <p class="text-[10px] text-slate-600 mt-3 font-mono">이 코드를 팀원에게 공유하세요</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 그룹 생성하기                            -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-create-group" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[440px] max-w-[90vw] shadow-2xl overflow-hidden">
+
+    <!-- Modal Header -->
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[#252838]">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[#6046ff] text-xl">group_add</span>
+        <span class="text-base font-bold text-white">그룹 생성하기</span>
+      </div>
+      <button id="btn-modal-close" class="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-1">
+        <span class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+
+    <!-- Step 1: 입력 폼 -->
+    <div id="modal-step-form" class="p-6 space-y-5">
+      <div>
+        <label for="input-group-name" class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">그룹 이름</label>
+        <input
+          id="input-group-name"
+          type="text"
+          maxlength="30"
+          placeholder="그룹 이름을 입력하세요"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono transition-colors"
+        >
+      </div>
+      <div>
+        <label for="input-nickname" class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">닉네임</label>
+        <input
+          id="input-nickname"
+          type="text"
+          maxlength="20"
+          placeholder="사용할 닉네임을 입력하세요"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono transition-colors"
+        >
+      </div>
+      <p id="modal-form-error" class="text-xs text-red-400 hidden">그룹 이름과 닉네임을 모두 입력해주세요.</p>
+      <button id="btn-create-submit" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer mt-2">
+        생성하기
+      </button>
+    </div>
+
+    <!-- Step 2: 초대코드 -->
+    <div id="modal-step-done" class="p-6 hidden">
+      <div class="flex flex-col items-center text-center mb-6">
+        <div class="w-14 h-14 rounded-full bg-[#6046ff]/15 border border-[#6046ff]/30 flex items-center justify-center mb-4">
+          <span class="material-symbols-outlined text-[#6046ff] text-3xl" style="font-variation-settings:'FILL' 1">check_circle</span>
+        </div>
+        <p class="text-xs text-slate-500 uppercase tracking-widest font-mono mb-1">그룹이 생성되었습니다</p>
+        <p id="created-group-name" class="text-lg font-bold text-white"></p>
+      </div>
+
+      <div class="bg-[#0d0f18] border border-[#252838] rounded-xl p-4 mb-5">
+        <p class="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-3">초대 코드</p>
+        <div class="flex items-center gap-3">
+          <code id="invite-code-display" class="flex-1 text-xl font-mono font-bold text-[#c6bfff] tracking-[0.2em]"></code>
+          <button id="btn-copy-code" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#6046ff]/10 border border-[#6046ff]/30 rounded-lg text-xs font-bold text-[#6046ff] hover:bg-[#6046ff]/20 transition-colors cursor-pointer flex-shrink-0">
+            <span class="material-symbols-outlined text-[16px]">content_copy</span>
+            복사
+          </button>
+        </div>
+        <p class="text-[10px] text-slate-600 mt-3 font-mono">이 코드를 팀원에게 공유하세요</p>
+      </div>
+
+      <button id="btn-enter-created-group" class="w-full py-3 bg-[#6046ff] hover:bg-[#725bff] text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">
+        그룹 입장하기
+      </button>
+    </div>
+
   </div>
 </div>
 
