@@ -393,7 +393,7 @@
           <div class="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-2">Community</div>
           <h1 class="text-3xl font-bold text-white mb-3">커뮤니티</h1>
           <p class="text-sm text-slate-400 leading-relaxed max-w-md">
-            매숑이 네트워크의 사용자들과 연결하고 프로젝트를 공유하세요.<br>
+            매숑이들과 연결하고 AI 사용 현황을 공유하세요.<br>
             현재 활성화된 노드 및 그룹 목록입니다.
           </p>
         </div>
@@ -413,66 +413,10 @@
       <div>
         <div class="flex items-center gap-3 mb-5">
           <span class="text-base font-bold text-slate-200">내 그룹 목록</span>
-          <span class="text-[11px] font-mono font-bold text-[#6046ff] bg-[#6046ff]/10 border border-[#6046ff]/30 px-2 py-0.5 rounded">4_ACTIVE</span>
+          <span id="my-groups-count" class="text-[11px] font-mono font-bold text-[#6046ff] bg-[#6046ff]/10 border border-[#6046ff]/30 px-2 py-0.5 rounded">0_ACTIVE</span>
         </div>
-        <div class="grid grid-cols-4 gap-4">
-
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors">
-            <div class="flex-1 min-h-[80px]">
-              <h3 class="text-base font-bold text-white mb-3">매숑이 파이썬 스터디</h3>
-              <div class="flex items-center gap-1.5 text-xs text-slate-500">
-                <span class="material-symbols-outlined text-[14px]">group</span>
-                <span class="font-mono">12/20 MEMBERS</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 mt-6 pt-4 border-t border-[#252838]/50">
-              <button class="btn-group-enter px-4 py-1.5 bg-[#1c1f2e] border border-[#474556] rounded text-xs font-bold text-slate-200 hover:bg-[#6046ff] hover:border-[#6046ff] hover:text-white transition-colors cursor-pointer">진입</button>
-              <button class="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer">나가기</button>
-            </div>
-          </div>
-
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors">
-            <div class="flex-1 min-h-[80px]">
-              <h3 class="text-base font-bold text-white mb-3">UI/UX 리서치 그룹</h3>
-              <div class="flex items-center gap-1.5 text-xs text-slate-500">
-                <span class="material-symbols-outlined text-[14px]">group</span>
-                <span class="font-mono">5/10 MEMBERS</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 mt-6 pt-4 border-t border-[#252838]/50">
-              <button class="btn-group-enter px-4 py-1.5 bg-[#1c1f2e] border border-[#474556] rounded text-xs font-bold text-slate-200 hover:bg-[#6046ff] hover:border-[#6046ff] hover:text-white transition-colors cursor-pointer">진입</button>
-              <button class="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer">나가기</button>
-            </div>
-          </div>
-
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors">
-            <div class="flex-1 min-h-[80px]">
-              <h3 class="text-base font-bold text-white mb-3">백엔드 보안 아키텍처</h3>
-              <div class="flex items-center gap-1.5 text-xs text-slate-500">
-                <span class="material-symbols-outlined text-[14px]">group</span>
-                <span class="font-mono">8/20 MEMBERS</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 mt-6 pt-4 border-t border-[#252838]/50">
-              <button class="btn-group-enter px-4 py-1.5 bg-[#1c1f2e] border border-[#474556] rounded text-xs font-bold text-slate-200 hover:bg-[#6046ff] hover:border-[#6046ff] hover:text-white transition-colors cursor-pointer">진입</button>
-              <button class="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer">나가기</button>
-            </div>
-          </div>
-
-          <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors">
-            <div class="flex-1 min-h-[80px]">
-              <h3 class="text-base font-bold text-white mb-3">빅데이터 분석 입문</h3>
-              <div class="flex items-center gap-1.5 text-xs text-slate-500">
-                <span class="material-symbols-outlined text-[14px]">group</span>
-                <span class="font-mono">15/30 MEMBERS</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 mt-6 pt-4 border-t border-[#252838]/50">
-              <button class="btn-group-enter px-4 py-1.5 bg-[#1c1f2e] border border-[#474556] rounded text-xs font-bold text-slate-200 hover:bg-[#6046ff] hover:border-[#6046ff] hover:text-white transition-colors cursor-pointer">진입</button>
-              <button class="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer">나가기</button>
-            </div>
-          </div>
-
+        <div id="group-cards" class="grid grid-cols-4 gap-4">
+          <!-- JS로 동적 렌더링 -->
         </div>
       </div>
     </div>
@@ -707,7 +651,7 @@
 </div>
 
 <!-- Notification toasts -->
-<div id="toast-container" class="fixed top-20 right-6 z-[100] space-y-2 pointer-events-none"></div>
+<div id="toast-container" class="fixed top-20 right-6 z-[300] space-y-2 pointer-events-none"></div>
 
 <!-- Bash command popover (tldr + co-occurrence) -->
 <div id="bash-popover" class="fixed inset-0 z-[110] hidden items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -726,6 +670,21 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 확인 다이얼로그                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-confirm" class="fixed inset-0 z-[250] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[360px] max-w-[90vw] shadow-2xl p-6 space-y-5">
+    <div class="flex items-center gap-3">
+      <span class="material-symbols-outlined text-amber-400 text-2xl" style="font-variation-settings:'FILL' 1">warning</span>
+      <p id="modal-confirm-message" class="text-sm text-slate-200 leading-relaxed"></p>
+    </div>
+    <div class="flex gap-3">
+      <button id="btn-confirm-cancel" class="flex-1 py-2.5 border border-[#252838] hover:border-[#474556] text-slate-400 hover:text-slate-200 font-bold text-sm rounded-lg transition-colors cursor-pointer">취소</button>
+      <button id="btn-confirm-ok" class="flex-1 py-2.5 bg-red-500/80 hover:bg-red-500 text-white font-bold text-sm rounded-lg transition-colors cursor-pointer">나가기</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: 그룹 참여하기                            -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="modal-join-group" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -753,6 +712,16 @@
           maxlength="8"
           placeholder="8자리 코드 입력 (예: KQ7RMP2A)"
           class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none font-mono tracking-widest uppercase transition-colors"
+        >
+      </div>
+      <div>
+        <label for="input-join-nickname" class="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">닉네임</label>
+        <input
+          id="input-join-nickname"
+          type="text"
+          maxlength="50"
+          placeholder="이 그룹에서 사용할 닉네임"
+          class="w-full bg-[#0d0f18] border border-[#252838] rounded-lg px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-[#6046ff] focus:ring-1 focus:ring-[#6046ff] outline-none transition-colors"
         >
       </div>
       <p id="join-form-error" class="text-xs text-red-400 hidden">유효한 초대 코드를 입력해주세요.</p>
@@ -790,6 +759,37 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 초대 코드 확인                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-view-code" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[400px] max-w-[90vw] shadow-2xl overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[#252838]">
+      <div class="flex items-center gap-2">
+        <span class="material-symbols-outlined text-[#6046ff] text-xl">key</span>
+        <span class="text-base font-bold text-white">초대 코드</span>
+      </div>
+      <button id="btn-view-code-close" class="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-1">
+        <span class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <div class="p-6">
+      <p id="view-code-group-name" class="text-sm text-slate-400 mb-4"></p>
+      <div class="bg-[#0d0f18] border border-[#252838] rounded-xl p-4">
+        <p class="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-3">Invite Code</p>
+        <div class="flex items-center gap-3">
+          <code id="view-code-display" class="flex-1 text-2xl font-mono font-bold text-[#c6bfff] tracking-[0.2em]"></code>
+          <button id="btn-view-code-copy" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#6046ff]/10 border border-[#6046ff]/30 rounded-lg text-xs font-bold text-[#6046ff] hover:bg-[#6046ff]/20 transition-colors cursor-pointer flex-shrink-0">
+            <span class="material-symbols-outlined text-[16px]">content_copy</span>
+            복사
+          </button>
+        </div>
+        <p class="text-[10px] text-slate-600 mt-3 font-mono">이 코드를 팀원에게 공유하세요</p>
+      </div>
+    </div>
   </div>
 </div>
 

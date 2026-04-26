@@ -5,6 +5,8 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { initDB } = require('./db');
+const communityRouter = require('./routes/community');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -632,7 +634,7 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // ── Routes ───────────────────────────────────────
 
@@ -794,10 +796,19 @@ app.get('/api/events', (req, res) => {
   res.json(events.slice(-100));
 });
 
+app.use('/api/community', communityRouter);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────
 
-app.listen(PORT, () => {
-  console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
-});
+initDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('DB 초기화 실패:', err.message);
+    process.exit(1);
+  });

@@ -566,27 +566,37 @@ function sendBrowserNotification(title, message) {
   } catch (_) {}
 }
 
-function showToast(title, message) {
+function showToast(title, message, type = 'info') {
   // Also send browser notification when tab is hidden
   sendBrowserNotification(title, message);
   if (!toastContainer) return;
+
+  const styles = {
+    info:    { border: 'border-[#6046ff]/30', icon: 'notifications_active', iconColor: 'text-[#6046ff]', shadow: 'shadow-[0_8px_32px_rgba(96,70,255,0.15)]' },
+    error:   { border: 'border-red-500/30',   icon: 'error',                iconColor: 'text-red-400',   shadow: 'shadow-[0_8px_32px_rgba(239,68,68,0.15)]'  },
+    success: { border: 'border-emerald-500/30', icon: 'check_circle',       iconColor: 'text-emerald-400', shadow: 'shadow-[0_8px_32px_rgba(52,211,153,0.15)]' },
+    warning: { border: 'border-amber-500/30', icon: 'warning',              iconColor: 'text-amber-400', shadow: 'shadow-[0_8px_32px_rgba(245,158,11,0.15)]' },
+  };
+  const s = styles[type] || styles.info;
+
   const toast = document.createElement('div');
-  toast.className = 'pointer-events-auto bg-[#13151f] border border-[#6046ff]/30 rounded-lg p-4 shadow-[0_8px_32px_rgba(96,70,255,0.15)] backdrop-blur-xl max-w-sm animate-slide-in';
+  toast.className = `pointer-events-auto bg-[#13151f] border ${s.border} rounded-lg p-4 ${s.shadow} backdrop-blur-xl max-w-sm animate-slide-in`;
   toast.innerHTML = `
     <div class="flex items-start gap-3">
-      <span class="material-symbols-outlined text-[#6046ff] text-lg flex-shrink-0 mt-0.5">notifications_active</span>
+      <span class="material-symbols-outlined ${s.iconColor} text-lg flex-shrink-0 mt-0.5" style="font-variation-settings:'FILL' 1">${s.icon}</span>
       <div class="flex-1 min-w-0">
         <div class="text-xs font-bold text-slate-200">${esc(title)}</div>
         <div class="text-[11px] text-slate-400 mt-0.5">${esc(message)}</div>
       </div>
     </div>`;
   toastContainer.appendChild(toast);
+  const duration = type === 'error' ? 6000 : 5000;
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(100%)';
     toast.style.transition = 'all 0.3s ease';
     setTimeout(() => toast.remove(), 300);
-  }, 5000);
+  }, duration);
 }
 
 connect();
@@ -2487,23 +2497,234 @@ async function openDocumentPip() {
 }
 
 /* ══════════════════════════════════════════════════
+   Community: 그룹 목록 fetch & 렌더링
+   ══════════════════════════════════════════════════ */
+const MEMBER_ID_KEY = 'community_member_id';
+
+function saveMemberId(id) {
+  localStorage.setItem(MEMBER_ID_KEY, String(id));
+}
+
+function getMemberId() {
+  return localStorage.getItem(MEMBER_ID_KEY) || '';
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function fetchMyGroups() {
+  const memberId = getMemberId();
+  if (!memberId) return [];
+  try {
+    const res = await fetch(`/api/community/groups?memberId=${memberId}`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (_) { return []; }
+}
+
+function renderGroupCards(groups) {
+  const container = document.getElementById('group-cards');
+  const badge     = document.getElementById('my-groups-count');
+  if (!container) return;
+
+  if (badge) badge.textContent = `${groups.length}_ACTIVE`;
+
+  if (groups.length === 0) {
+    container.innerHTML = `
+      <div class="col-span-4 py-16 flex flex-col items-center justify-center text-center">
+        <span class="material-symbols-outlined text-5xl text-slate-700 mb-3">group_off</span>
+        <p class="text-sm text-slate-500">참여 중인 그룹이 없습니다</p>
+        <p class="text-xs text-slate-600 mt-1">그룹을 생성하거나 초대 코드로 참여해보세요</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = groups.map(g => `
+    <div class="bg-[#13151f] border border-[#252838] rounded-xl p-5 flex flex-col hover:border-[#6046ff]/30 transition-colors" data-group-id="${g.id}" data-group-code="${escapeHtml(g.code)}" data-group-name="${escapeHtml(g.name)}">
+      <div class="flex-1 min-h-[80px]">
+        <div class="flex items-start justify-between mb-3">
+          <h3 class="text-base font-bold text-white leading-snug">${escapeHtml(g.name)}</h3>
+          <div class="relative flex-shrink-0 ml-2">
+            <button class="btn-group-more w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:text-slate-300 hover:bg-[#252838] transition-colors cursor-pointer">
+              <span class="material-symbols-outlined text-[18px]">more_horiz</span>
+            </button>
+            <div class="group-more-menu hidden absolute right-0 top-8 z-20 bg-[#1c1f2e] border border-[#252838] rounded-lg shadow-xl w-36 py-1">
+              <button class="btn-view-code w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-[#252838] hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+                <span class="material-symbols-outlined text-[14px]">key</span>
+                초대 코드 보기
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 text-xs text-slate-500">
+          <span class="material-symbols-outlined text-[14px]">group</span>
+          <span class="font-mono">${g.memberCount}/${g.maxMembers} MEMBERS</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 mt-6 pt-4 border-t border-[#252838]/50">
+        <button class="btn-group-enter px-4 py-1.5 bg-[#1c1f2e] border border-[#474556] rounded text-xs font-bold text-slate-200 hover:bg-[#6046ff] hover:border-[#6046ff] hover:text-white transition-colors cursor-pointer">진입</button>
+        <button class="btn-group-leave px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer">나가기</button>
+      </div>
+    </div>`).join('');
+}
+
+async function refreshGroupList() {
+  const groups = await fetchMyGroups();
+  renderGroupCards(groups);
+}
+
+// 커뮤니티 탭 클릭 시 목록 갱신
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  if (btn.dataset.tab === 'community') {
+    btn.addEventListener('click', refreshGroupList);
+  }
+});
+
+// 초기 로드 시 커뮤니티 탭이 활성화돼 있으면 바로 갱신
+if (document.getElementById('view-community') && !document.getElementById('view-community').classList.contains('hidden')) {
+  refreshGroupList();
+}
+
+/* ══════════════════════════════════════════════════
+   Community: 확인 다이얼로그
+   ══════════════════════════════════════════════════ */
+function showConfirm(message) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('modal-confirm');
+    document.getElementById('modal-confirm-message').textContent = message;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    function cleanup(result) {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    }
+    const okBtn     = document.getElementById('btn-confirm-ok');
+    const cancelBtn = document.getElementById('btn-confirm-cancel');
+    const onOk     = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
+/* ══════════════════════════════════════════════════
+   Community: 초대 코드 확인 모달
+   ══════════════════════════════════════════════════ */
+const modalViewCode = document.getElementById('modal-view-code');
+
+function openViewCodeModal(groupName, code) {
+  document.getElementById('view-code-group-name').textContent = groupName;
+  document.getElementById('view-code-display').textContent    = code;
+  const copyBtn = document.getElementById('btn-view-code-copy');
+  copyBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">content_copy</span> 복사';
+  copyBtn.classList.remove('text-emerald-400', 'border-emerald-400/30', 'bg-emerald-400/10');
+  copyBtn.classList.add('text-[#6046ff]', 'border-[#6046ff]/30', 'bg-[#6046ff]/10');
+  modalViewCode.classList.remove('hidden');
+  modalViewCode.classList.add('flex');
+}
+
+function closeViewCodeModal() {
+  modalViewCode.classList.add('hidden');
+  modalViewCode.classList.remove('flex');
+}
+
+document.getElementById('btn-view-code-close')?.addEventListener('click', closeViewCodeModal);
+modalViewCode?.addEventListener('click', e => {
+  if (e.target === modalViewCode) closeViewCodeModal();
+});
+
+document.getElementById('btn-view-code-copy')?.addEventListener('click', () => {
+  const code = document.getElementById('view-code-display').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    const btn = document.getElementById('btn-view-code-copy');
+    btn.innerHTML = '<span class="material-symbols-outlined text-[16px]">check</span> 복사됨';
+    btn.classList.remove('text-[#6046ff]', 'border-[#6046ff]/30', 'bg-[#6046ff]/10');
+    btn.classList.add('text-emerald-400', 'border-emerald-400/30', 'bg-emerald-400/10');
+    setTimeout(() => {
+      btn.innerHTML = '<span class="material-symbols-outlined text-[16px]">content_copy</span> 복사';
+      btn.classList.remove('text-emerald-400', 'border-emerald-400/30', 'bg-emerald-400/10');
+      btn.classList.add('text-[#6046ff]', 'border-[#6046ff]/30', 'bg-[#6046ff]/10');
+    }, 2000);
+  });
+});
+
+// 더보기 드롭다운 — 이벤트 위임
+document.getElementById('group-cards')?.addEventListener('click', async e => {
+  // 더보기 버튼 토글
+  const moreBtn = e.target.closest('.btn-group-more');
+  if (moreBtn) {
+    e.stopPropagation();
+    const menu = moreBtn.nextElementSibling;
+    const isOpen = !menu.classList.contains('hidden');
+    // 열려있는 다른 메뉴 모두 닫기
+    document.querySelectorAll('.group-more-menu').forEach(m => m.classList.add('hidden'));
+    if (!isOpen) menu.classList.remove('hidden');
+    return;
+  }
+
+  // 초대 코드 보기
+  const codeBtn = e.target.closest('.btn-view-code');
+  if (codeBtn) {
+    const card = codeBtn.closest('[data-group-code]');
+    openViewCodeModal(card.dataset.groupName, card.dataset.groupCode);
+    document.querySelectorAll('.group-more-menu').forEach(m => m.classList.add('hidden'));
+    return;
+  }
+
+  // 그룹 나가기
+  const leaveBtn = e.target.closest('.btn-group-leave');
+  if (leaveBtn) {
+    const card      = leaveBtn.closest('[data-group-id]');
+    const groupId   = Number(card.dataset.groupId);
+    const groupName = card.dataset.groupName;
+    if (!await showConfirm(`"${groupName}" 그룹에서 나가시겠어요?`)) return;
+
+    const memberId = getMemberId();
+    if (!memberId) return;
+
+    try {
+      const res  = await fetch(`/api/community/groups/${groupId}/leave`, {
+        method:  'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ memberId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
+
+      showToast('그룹 나가기', `"${groupName}"에서 나왔어요.`, 'info');
+      await refreshGroupList();
+    } catch (e) {
+      showToast('그룹 나가기 실패', e.message, 'error');
+    }
+    return;
+  }
+});
+
+// 카드 영역 외 클릭 시 드롭다운 닫기
+document.addEventListener('click', () => {
+  document.querySelectorAll('.group-more-menu').forEach(m => m.classList.add('hidden'));
+});
+
+/* ══════════════════════════════════════════════════
    Community: 그룹 참여 모달
    ══════════════════════════════════════════════════ */
 const modalJoinGroup  = document.getElementById('modal-join-group');
 const joinStepForm    = document.getElementById('join-step-form');
 const joinStepConfirm = document.getElementById('join-step-confirm');
 
-// 더미 그룹 데이터 — 나중에 실제 API로 교체
-const DUMMY_GROUPS = {
-  'KQ7RMP2A': { name: '매숑이 파이썬 스터디',  members: '12/20' },
-  'ZT3NXVPQ': { name: 'UI/UX 리서치 그룹',     members: '5/10'  },
-  'BW9CDFR1': { name: '백엔드 보안 아키텍처',   members: '8/20'  },
-  'MH4YLSGE': { name: '빅데이터 분석 입문',     members: '15/30' },
-};
-
 function openJoinGroupModal() {
   document.getElementById('input-invite-code').value = '';
+  document.getElementById('input-join-nickname').value = '';
   document.getElementById('join-form-error').classList.add('hidden');
+  document.getElementById('btn-join-verify').disabled = false;
+  document.getElementById('btn-join-verify').textContent = '코드 확인';
   joinStepForm.classList.remove('hidden');
   joinStepConfirm.classList.add('hidden');
   modalJoinGroup.classList.remove('hidden');
@@ -2522,37 +2743,78 @@ modalJoinGroup?.addEventListener('click', e => {
   if (e.target === modalJoinGroup) closeJoinGroupModal();
 });
 
-// 대문자 자동 변환
 document.getElementById('input-invite-code')?.addEventListener('input', e => {
   e.target.value = e.target.value.toUpperCase();
 });
 
-document.getElementById('btn-join-verify')?.addEventListener('click', () => {
-  const code    = document.getElementById('input-invite-code').value.trim();
-  const errorEl = document.getElementById('join-form-error');
-  const group   = DUMMY_GROUPS[code];
+document.getElementById('btn-join-verify')?.addEventListener('click', async () => {
+  const code      = document.getElementById('input-invite-code').value.trim();
+  const nickname  = document.getElementById('input-join-nickname').value.trim();
+  const errorEl   = document.getElementById('join-form-error');
+  const verifyBtn = document.getElementById('btn-join-verify');
 
-  if (!code || !group) {
-    errorEl.textContent = code ? '존재하지 않는 초대 코드예요.' : '초대 코드를 입력해주세요.';
+  if (!code) {
+    errorEl.textContent = '초대 코드를 입력해주세요.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  if (!nickname) {
+    errorEl.textContent = '닉네임을 입력해주세요.';
     errorEl.classList.remove('hidden');
     return;
   }
   errorEl.classList.add('hidden');
+  verifyBtn.disabled = true;
+  verifyBtn.textContent = '확인 중...';
 
-  document.getElementById('join-group-name').textContent    = group.name;
-  document.getElementById('join-group-members').textContent = `${group.members} MEMBERS`;
-  joinStepForm.classList.add('hidden');
-  joinStepConfirm.classList.remove('hidden');
+  try {
+    const res  = await fetch(`/api/community/groups/verify?code=${encodeURIComponent(code)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
+
+    document.getElementById('join-group-name').textContent    = data.name;
+    document.getElementById('join-group-members').textContent = `${data.memberCount}/${data.maxMembers} MEMBERS`;
+    joinStepForm.classList.add('hidden');
+    joinStepConfirm.classList.remove('hidden');
+  } catch (e) {
+    showToast('코드 확인 실패', e.message, 'error');
+    verifyBtn.disabled = false;
+    verifyBtn.textContent = '코드 확인';
+  }
 });
 
 document.getElementById('btn-join-back')?.addEventListener('click', () => {
   joinStepConfirm.classList.add('hidden');
   joinStepForm.classList.remove('hidden');
+  document.getElementById('btn-join-verify').disabled = false;
+  document.getElementById('btn-join-verify').textContent = '코드 확인';
 });
 
-document.getElementById('btn-join-confirm')?.addEventListener('click', () => {
-  closeJoinGroupModal();
-  showCommunityChat();
+document.getElementById('btn-join-confirm')?.addEventListener('click', async () => {
+  const code      = document.getElementById('input-invite-code').value.trim();
+  const confirmBtn = document.getElementById('btn-join-confirm');
+  const errorEl   = document.getElementById('join-form-error');
+
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = '참여 중...';
+
+  try {
+    const res  = await fetch('/api/community/groups/join', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code, nickname: document.getElementById('input-join-nickname').value.trim(), memberId: getMemberId() || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
+
+    saveMemberId(data.memberId);
+    closeJoinGroupModal();
+    await refreshGroupList();
+    showCommunityChat();
+  } catch (e) {
+    showToast('그룹 참여 실패', e.message, 'error');
+    closeJoinGroupModal();
+  }
 });
 
 /* ══════════════════════════════════════════════════
@@ -2562,16 +2824,12 @@ const modalCreateGroup = document.getElementById('modal-create-group');
 const modalStepForm    = document.getElementById('modal-step-form');
 const modalStepDone    = document.getElementById('modal-step-done');
 
-function generateInviteCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-}
-
 function openCreateGroupModal() {
-  // 폼 초기화
   document.getElementById('input-group-name').value = '';
   document.getElementById('input-nickname').value = '';
   document.getElementById('modal-form-error').classList.add('hidden');
+  document.getElementById('btn-create-submit').disabled = false;
+  document.getElementById('btn-create-submit').textContent = '생성하기';
   modalStepForm.classList.remove('hidden');
   modalStepDone.classList.add('hidden');
   modalCreateGroup.classList.remove('hidden');
@@ -2592,23 +2850,40 @@ modalCreateGroup?.addEventListener('click', e => {
   if (e.target === modalCreateGroup) closeCreateGroupModal();
 });
 
-document.getElementById('btn-create-submit')?.addEventListener('click', () => {
-  const groupName = document.getElementById('input-group-name').value.trim();
-  const nickname  = document.getElementById('input-nickname').value.trim();
-  const errorEl   = document.getElementById('modal-form-error');
+document.getElementById('btn-create-submit')?.addEventListener('click', async () => {
+  const groupName  = document.getElementById('input-group-name').value.trim();
+  const nickname   = document.getElementById('input-nickname').value.trim();
+  const errorEl    = document.getElementById('modal-form-error');
+  const submitBtn  = document.getElementById('btn-create-submit');
 
   if (!groupName || !nickname) {
+    errorEl.textContent = '그룹 이름과 닉네임을 모두 입력해주세요.';
     errorEl.classList.remove('hidden');
     return;
   }
   errorEl.classList.add('hidden');
+  submitBtn.disabled = true;
+  submitBtn.textContent = '생성 중...';
 
-  const code = generateInviteCode();
-  document.getElementById('created-group-name').textContent = groupName;
-  document.getElementById('invite-code-display').textContent = code;
+  try {
+    const res  = await fetch('/api/community/groups', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name: groupName, nickname, memberId: getMemberId() || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
 
-  modalStepForm.classList.add('hidden');
-  modalStepDone.classList.remove('hidden');
+    saveMemberId(data.memberId);
+    document.getElementById('created-group-name').textContent  = data.name;
+    document.getElementById('invite-code-display').textContent = data.code;
+    modalStepForm.classList.add('hidden');
+    modalStepDone.classList.remove('hidden');
+  } catch (e) {
+    showToast('그룹 생성 실패', e.message, 'error');
+    submitBtn.disabled = false;
+    submitBtn.textContent = '생성하기';
+  }
 });
 
 document.getElementById('btn-copy-code')?.addEventListener('click', () => {
@@ -2629,6 +2904,7 @@ document.getElementById('btn-copy-code')?.addEventListener('click', () => {
 
 document.getElementById('btn-enter-created-group')?.addEventListener('click', () => {
   closeCreateGroupModal();
+  refreshGroupList();
   showCommunityChat();
 });
 
