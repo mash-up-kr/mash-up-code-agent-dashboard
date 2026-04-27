@@ -217,8 +217,8 @@ function applyRecord(r) {
 }
 
 // ── JSONL incremental parser ─────────────────────
-const pendingFlush = [];
 const fileParseQueues = new Map();
+let periodicRescanInFlight = false;
 
 async function parseFile(filePath, sessionId, fallbackProjectPath) {
   let safe;
@@ -303,7 +303,7 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
   }
 
   if (newRecords.length > 0) {
-    pendingFlush.push(...newRecords);
+    stmtInsertMany(newRecords);
     touchUsageState();
   }
 
@@ -329,15 +329,6 @@ function enqueueFileParse(filePath, sessionId, fallbackProjectPath) {
   return current;
 }
 
-// ── SQLite flush ─────────────────────────────────
-function flushToSQLite() {
-  if (pendingFlush.length === 0) return;
-  stmtInsertMany(pendingFlush.splice(0));
-}
-setInterval(flushToSQLite, 5 * 60 * 1000);
-process.on('exit', flushToSQLite);
-process.on('SIGTERM', () => { flushToSQLite(); process.exit(0); });
-
 // ── Restore from SQLite ──────────────────────────
 function restoreFromSQLite() {
   const rows = db.prepare('SELECT * FROM usage_records ORDER BY recorded_at ASC').all();
@@ -345,9 +336,7 @@ function restoreFromSQLite() {
   console.log(`[usage] Restored ${rows.length} records from SQLite`);
 }
 
-// ── Initial scan ─────────────────────────────────
-async function initialScan() {
-  console.log('[usage] Initial JSONL scan...');
+async function scanAllJsonlFiles() {
   let projectDirs;
   try { projectDirs = fs.readdirSync(CLAUDE_PROJECTS_DIR); }
   catch (e) { console.error('[usage] Cannot read projects dir:', e.message); return; }
@@ -374,7 +363,31 @@ async function initialScan() {
       } catch (_) {}
     }
   }
+}
+
+// ── Initial scan ─────────────────────────────────
+async function initialScan() {
+  console.log('[usage] Initial JSONL scan...');
+  await scanAllJsonlFiles();
   console.log(`[usage] Scan done. Projects: ${Object.keys(usageState.projects).length}`);
+}
+
+function startPeriodicRescan() {
+  setInterval(async () => {
+    if (periodicRescanInFlight) return;
+    periodicRescanInFlight = true;
+    try {
+      const prevUpdatedAt = usageState.updatedAt;
+      await scanAllJsonlFiles();
+      if (usageState.updatedAt && usageState.updatedAt !== prevUpdatedAt) {
+        broadcastUsage();
+      }
+    } catch (e) {
+      console.error('[usage] Periodic rescan failed:', e.message);
+    } finally {
+      periodicRescanInFlight = false;
+    }
+  }, 30 * 1000);
 }
 
 // ── Chokidar watcher ─────────────────────────────
@@ -425,6 +438,7 @@ async function init() {
   restoreFromSQLite();
   await initialScan();
   startWatcher();
+  startPeriodicRescan();
 }
 
 module.exports = { router, init, updateRateLimits };
