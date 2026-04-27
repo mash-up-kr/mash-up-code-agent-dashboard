@@ -3188,7 +3188,7 @@ function getLiveUsageSessionActivity(projectPath, usageSession) {
   }
   const sessionName = usageSession?.sessionName || '';
   const matched = activeSessions.filter(sess => (sess.name || '').trim() === sessionName.trim());
-  const source = matched.length > 0 ? matched : (activeSessions.length === 1 ? activeSessions : []);
+  const source = matched.length > 0 ? matched : [];
   if (source.length === 0) return null;
   return Math.max(...source.map(sess => sess.lastActivityAt || sess.startedAt || 0));
 }
@@ -3279,6 +3279,14 @@ function renderUsageTab(data) {
 
   const tableBody = document.getElementById('project-table-body');
 
+  const openProjects = new Set();
+  tableBody.querySelectorAll('.project-row').forEach(row => {
+    const firstDetail = row.nextElementSibling;
+    if (firstDetail && !firstDetail.classList.contains('hidden')) {
+      openProjects.add(row.dataset.projPath);
+    }
+  });
+
   if (projectEntries.length === 0) {
     tableBody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-600 text-xs">데이터 없음 — JSONL 파싱 중이거나 사용 기록이 없습니다</td></tr>`;
   } else {
@@ -3293,7 +3301,7 @@ function renderUsageTab(data) {
         .sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1);
 
       const headerRow = `
-        <tr class="hover:bg-[#1c1f2e] cursor-pointer project-row" data-session-count="${sessArr.length + 1}">
+        <tr class="hover:bg-[#1c1f2e] cursor-pointer project-row" data-session-count="${sessArr.length + 1}" data-proj-path="${esc(projPath)}">
           <td class="px-6 py-3 text-slate-300 flex items-center gap-2">
             <span class="material-symbols-outlined text-[14px] transition-transform accordion-arrow">chevron_right</span>
             ${esc(projName)}
@@ -3331,6 +3339,23 @@ function renderUsageTab(data) {
 
       return headerRow + subheaderRow + sessionRows;
     }).join('');
+  }
+
+  /* ── 아코디언 상태 복원 ──────────────────────────── */
+  if (openProjects.size > 0) {
+    tableBody.querySelectorAll('.project-row').forEach(row => {
+      if (!openProjects.has(row.dataset.projPath)) return;
+      const count = parseInt(row.dataset.sessionCount) || 0;
+      let cur = row.nextElementSibling;
+      let n = 0;
+      while (cur && cur.classList.contains('session-detail') && n < count) {
+        cur.classList.remove('hidden');
+        n++;
+        cur = cur.nextElementSibling;
+      }
+      const arrow = row.querySelector('.accordion-arrow');
+      if (arrow) arrow.style.transform = 'rotate(90deg)';
+    });
   }
 
   /* ── 프로젝트 행 accordion ─────────────────────── */
