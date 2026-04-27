@@ -3071,10 +3071,11 @@ document.getElementById('view-community')?.addEventListener('click', e => {
 function formatTimeRemaining(ms) {
   if (!Number.isFinite(ms)) return '리셋 정보 없음';
   const totalSecs = Math.floor(ms / 1000);
-  if (totalSecs <= 0) return '곧 리셋';
   const days = Math.floor(totalSecs / 86400);
   const hours = Math.floor((totalSecs % 86400) / 3600);
   const mins = Math.floor((totalSecs % 3600) / 60);
+  if (totalSecs <= 0) return '이제 다시 쓸 수 있어요! 🥳 메시지를 보내면 리셋됩니다.';
+  if (totalSecs < 60) return '곧 리셋';
   
   if (days > 0) return `${days}일 ${hours}시간 후 리셋`;
   if (hours > 0) return `${hours}시간 ${mins}분 후 리셋`;
