@@ -9,6 +9,7 @@ const session        = require('express-session');
 const { initDB }     = require('./db');
 const communityRouter = require('./routes/community');
 const authRouter      = require('./routes/auth');
+const { router: usageRouter, init: initUsage } = require('./routes/usage');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -806,18 +807,20 @@ app.get('/api/events', (req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/community', communityRouter);
+app.use('/api/usage', usageRouter);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────
 
 initDB()
+  .then(() => initUsage())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
     });
   })
   .catch(err => {
-    console.error('DB 초기화 실패:', err.message);
+    console.error('초기화 실패:', err.message);
     process.exit(1);
   });

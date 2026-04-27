@@ -111,7 +111,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
     // 대시보드 탭 렌더링
     if (btn.dataset.tab === 'dashboard') {
-      renderUsageTab();
+      loadUsageSnapshot();
+      connectUsageStream();
     }
   });
 });
@@ -3139,147 +3140,267 @@ function getBarColor(percent) {
   return 'bg-[#6046ff]'; // purple
 }
 
-function renderUsageTab() {
-  // 플랜 소진율 렌더링
-  const plan5hBar = document.getElementById('plan-5h-bar');
-  const plan5hPercent = document.getElementById('plan-5h-percent');
-  const plan5hReset = document.getElementById('plan-5h-reset');
-  const plan7dBar = document.getElementById('plan-7d-bar');
-  const plan7dPercent = document.getElementById('plan-7d-percent');
-  const plan7dReset = document.getElementById('plan-7d-reset');
+/* ── Usage tab: model color map ─────────────────── */
+const MODEL_COLORS = [
+  { prefix: 'Opus',   color: '#a78bfa' },
+  { prefix: 'Sonnet', color: '#6046ff' },
+  { prefix: 'Haiku',  color: '#312e81' },
+];
+function modelColor(name) {
+  const m = MODEL_COLORS.find(c => name.startsWith(c.prefix));
+  return m ? m.color : '#6b7280';
+}
 
+function toLocalDateKey(input) {
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/* ── Build last-7-days rows from API daily state ── */
+function buildDailyRows(daily) {
+  const rows = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = toLocalDateKey(d);
+    const mm  = String(d.getMonth() + 1).padStart(2, '0');
+    const dd  = String(d.getDate()).padStart(2, '0');
+    const dayLabel = ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getDay()];
+    rows.push({ key, label: `${mm}/${dd}`, dayLabel, models: daily[key] || {} });
+  }
+  return rows;
+}
+
+function normalizePathForCompare(p) {
+  return String(p || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+}
+
+function getActiveUsageSessions(projectPath) {
+  const normalizedProjectPath = normalizePathForCompare(projectPath);
+  return [...sessions.values()].filter((sess) => {
+    if (!sess || sess.status === 'ended') return false;
+    return normalizePathForCompare(sess.cwd) === normalizedProjectPath;
+  });
+}
+
+function getLiveUsageProjectActivity(projectPath) {
+  const activeSessions = getActiveUsageSessions(projectPath);
+  if (activeSessions.length === 0) return null;
+  return Math.max(...activeSessions.map(sess => sess.lastActivityAt || sess.startedAt || 0));
+}
+
+function getLiveUsageSessionActivity(projectPath, usageSession) {
+  const activeSessions = getActiveUsageSessions(projectPath);
+  if (activeSessions.length === 0) return null;
+  const usageSessionId = usageSession?.sessionId || null;
+  const matchedById = usageSessionId
+    ? activeSessions.filter(sess => sess.sid === usageSessionId || sess.pid === usageSessionId)
+    : [];
+  if (matchedById.length > 0) {
+    return Math.max(...matchedById.map(sess => sess.lastActivityAt || sess.startedAt || 0));
+  }
+  const sessionName = usageSession?.sessionName || '';
+  const matched = activeSessions.filter(sess => (sess.name || '').trim() === sessionName.trim());
+  const source = matched.length > 0 ? matched : (activeSessions.length === 1 ? activeSessions : []);
+  if (source.length === 0) return null;
+  return Math.max(...source.map(sess => sess.lastActivityAt || sess.startedAt || 0));
+}
+
+function formatUsageLastActivity(isoOrTs) {
+  if (!isoOrTs) return '—';
+  const ts = typeof isoOrTs === 'number' ? isoOrTs : new Date(isoOrTs).getTime();
+  if (!Number.isFinite(ts)) return '—';
+  return formatTimeAgo(ts);
+}
+
+function renderUsageTab(data) {
+  /* ── 플랜 소진율 (범위 외 — 더미 유지) ─────────── */
   const p5h = DUMMY_DATA.plan5h;
   const p7d = DUMMY_DATA.plan7d;
-
+  const plan5hBar     = document.getElementById('plan-5h-bar');
+  const plan5hPercent = document.getElementById('plan-5h-percent');
+  const plan5hReset   = document.getElementById('plan-5h-reset');
+  const plan7dBar     = document.getElementById('plan-7d-bar');
+  const plan7dPercent = document.getElementById('plan-7d-percent');
+  const plan7dReset   = document.getElementById('plan-7d-reset');
   plan5hPercent.textContent = `${p5h.usedPercent}%`;
   plan5hBar.style.width = `${p5h.usedPercent}%`;
   plan5hBar.className = `h-full rounded-full ${getBarColor(p5h.usedPercent)}`;
   plan5hReset.textContent = formatTimeRemaining(p5h.resetMs);
-
   plan7dPercent.textContent = `${p7d.usedPercent}%`;
   plan7dBar.style.width = `${p7d.usedPercent}%`;
   plan7dBar.className = `h-full rounded-full ${getBarColor(p7d.usedPercent)}`;
   plan7dReset.textContent = formatTimeRemaining(p7d.resetMs);
-
-  // 세션 수
   document.getElementById('stat-weekly-sessions').textContent = DUMMY_DATA.weeklySessions;
 
-  // 일별 스택 막대 렌더링
+  /* ── 일별 스택 막대 ────────────────────────────── */
+  const daily          = data?.daily || {};
+  const dailyRows      = buildDailyRows(daily);
+  const allModelNames  = [...new Set(dailyRows.flatMap(r => Object.keys(r.models)))];
+  const maxTok = Math.max(1, ...dailyRows.map(r => Object.values(r.models).reduce((s, v) => s + v, 0)));
+
   const chartContainer = document.getElementById('chart-stacked-bars');
-  const maxTokens = Math.max(...DUMMY_DATA.dailyTokens.map(d => d.opus + d.sonnet + d.haiku));
-  
-  chartContainer.innerHTML = DUMMY_DATA.dailyTokens.map(day => {
-    const total = day.opus + day.sonnet + day.haiku;
-    const opusH = total > 0 ? (day.opus / maxTokens) * 100 : 0;
-    const sonnetH = total > 0 ? (day.sonnet / maxTokens) * 100 : 0;
-    const haikuH = total > 0 ? (day.haiku / maxTokens) * 100 : 0;
-    
+  chartContainer.innerHTML = dailyRows.map(row => {
+    const total   = Object.values(row.models).reduce((s, v) => s + v, 0);
+    const bars = allModelNames.map(model => {
+      const tokens = row.models[model] || 0;
+      if (!tokens) return '';
+      const heightPct = (tokens / maxTok) * 100;
+      const color = modelColor(model);
+      return `<div class="w-full cursor-pointer chart-bar"
+        style="height: ${heightPct}%; background: ${color};"
+        data-model="${esc(model)}" data-tokens="${tokens}" data-color="${color}"></div>`;
+    }).join('');
     return `
       <div class="flex-1 flex flex-col items-center">
         <div class="w-2/5 h-48 mx-auto flex flex-col-reverse gap-0.5 mb-2">
-          ${opusH > 0 ? `<div class="w-full bg-[#a78bfa] cursor-pointer chart-bar" style="height: ${opusH}%;" data-tooltip="opus" data-tokens="${day.opus}"></div>` : ''}
-          ${sonnetH > 0 ? `<div class="w-full bg-[#6046ff] cursor-pointer chart-bar" style="height: ${sonnetH}%;" data-tooltip="sonnet" data-tokens="${day.sonnet}"></div>` : ''}
-          ${haikuH > 0 ? `<div class="w-full bg-[#312e81] cursor-pointer chart-bar" style="height: ${haikuH}%;" data-tooltip="haiku" data-tokens="${day.haiku}"></div>` : ''}
-          ${total === 0 ? `<div class="w-full bg-[#1c1f2e] opacity-40 h-full"></div>` : ''}
+          ${total > 0 ? bars : ''}
         </div>
-        <span class="text-[10px] font-mono text-slate-500">${day.date}</span>
-        <span class="text-[8px] text-slate-600">${day.day}</span>
-      </div>
-    `;
+        <span class="text-[10px] font-mono text-slate-500">${row.label}</span>
+        <span class="text-[8px] text-slate-600">${row.dayLabel}</span>
+      </div>`;
   }).join('');
 
-  // 프로젝트 테이블 렌더링
+  /* ── 범례 동적 업데이트 ───────────────────────── */
+  const legendEl = document.getElementById('chart-legend');
+  if (legendEl && allModelNames.length > 0) {
+    legendEl.innerHTML = allModelNames.map(m =>
+      `<div class="flex items-center gap-2">
+        <div class="w-3 h-3 rounded-sm" style="background:${modelColor(m)}"></div>
+        <span class="text-xs text-slate-400">${esc(m)}</span>
+      </div>`
+    ).join('');
+  }
+
+  /* ── 프로젝트 테이블 ───────────────────────────── */
+  const rawProjects = data?.projects || {};
+  const projectEntries = Object.entries(rawProjects)
+    .sort((a, b) => (b[1].lastActivity || '') > (a[1].lastActivity || '') ? 1 : -1);
+
   const tableBody = document.getElementById('project-table-body');
-  tableBody.innerHTML = DUMMY_DATA.projects.flatMap((proj, idx) => {
-    const rows = [];
-    
-    // 프로젝트 헤더 행
-    rows.push(`
-      <tr class="hover:bg-[#1c1f2e] cursor-pointer project-row" data-project-idx="${idx}">
-        <td class="px-6 py-3 text-slate-300 flex items-center gap-2">
-          <span class="material-symbols-outlined text-[14px] transition-transform accordion-arrow">chevron_right</span>
-          ${esc(proj.name)}
-        </td>
-        <td class="px-6 py-3 text-right text-slate-300 font-mono">${(proj.totalTokens / 1000).toFixed(1)}K</td>
-        <td class="px-6 py-3 text-right text-slate-300">${proj.sessionCount}</td>
-        <td class="px-6 py-3 text-right">
-          <span class="font-mono ${proj.cacheEfficiency >= 70 ? 'text-emerald-400' : 'text-slate-400'}">${proj.cacheEfficiency}%</span>
-        </td>
-        <td class="px-6 py-3 text-right text-slate-500 text-xs">${formatTimeAgo(proj.lastActivity)}</td>
-      </tr>
-    `);
 
-    // 세션 상세 행 (숨겨짐)
-    const sessionHtml = proj.sessions.map(sess => `
-      <tr class="session-detail hidden">
-        <td class="px-6 py-2 pl-12 text-slate-400 text-xs font-mono">${esc(sess.name)}</td>
-        <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${new Date(sess.date).toLocaleDateString()} ${new Date(sess.date).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false })}</td>
-        <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${(sess.tokens / 1000).toFixed(1)}K</td>
-        <td class="px-6 py-2 text-right text-slate-400 text-xs">${sess.model}</td>
-        <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${sess.cacheHit}%</td>
-      </tr>
-    `).join('');
-    rows.push(sessionHtml);
+  if (projectEntries.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-600 text-xs">데이터 없음 — JSONL 파싱 중이거나 사용 기록이 없습니다</td></tr>`;
+  } else {
+    tableBody.innerHTML = projectEntries.flatMap(([projPath, proj], idx) => {
+      const projName   = projPath.split('/').filter(Boolean).pop() || projPath;
+      const cacheEff   = proj.cacheEfficiency != null ? Math.round(proj.cacheEfficiency * 100) : null;
+      const cacheLabel = cacheEff != null ? `${cacheEff}%` : '—';
+      const cacheClass = cacheEff != null && cacheEff >= 70 ? 'text-emerald-400' : 'text-slate-400';
+      const liveProjectActivity = getLiveUsageProjectActivity(projPath);
+      const hasLiveProjectActivity = Number.isFinite(liveProjectActivity) && liveProjectActivity > 0;
+      const sessArr    = Object.values(proj.sessions || {})
+        .sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1);
 
-    return rows.join('');
-  }).join('');
+      const headerRow = `
+        <tr class="hover:bg-[#1c1f2e] cursor-pointer project-row" data-session-count="${sessArr.length + 1}">
+          <td class="px-6 py-3 text-slate-300 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[14px] transition-transform accordion-arrow">chevron_right</span>
+            ${esc(projName)}
+          </td>
+          <td class="px-6 py-3 text-right text-slate-300 font-mono">${((proj.totalTokens || 0) / 1000).toFixed(1)}K</td>
+          <td class="px-6 py-3 text-right text-slate-300">${proj.sessionCount || 0}</td>
+          <td class="px-6 py-3 text-right"><span class="font-mono ${cacheClass}">${cacheLabel}</span></td>
+          <td class="px-6 py-3 text-right text-slate-500 text-xs">${hasLiveProjectActivity ? '실시간' : formatUsageLastActivity(proj.lastActivity)}</td>
+        </tr>`;
 
-  // 프로젝트 행 클릭 이벤트
+      const subheaderRow = `
+        <tr class="session-detail hidden border-t border-[#252838]/30">
+          <td class="px-6 py-1.5 pl-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">세션</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">사용 토큰</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">최근 사용 모델</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">캐시 효율</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">마지막 활동</td>
+        </tr>`;
+
+      const sessionRows = sessArr.map(sess => {
+        const sessCacheEff = sess.cacheEfficiency != null ? Math.round(sess.cacheEfficiency * 100) : null;
+        const liveSessionActivity = getLiveUsageSessionActivity(projPath, sess);
+        const hasLiveSessionActivity = Number.isFinite(liveSessionActivity) && liveSessionActivity > 0;
+        const lastAct = hasLiveSessionActivity ? '실시간' : formatUsageLastActivity(sess.lastActivity);
+        const sessionLabel = sess.sessionName || sess.name || '—';
+        return `
+          <tr class="session-detail hidden bg-[#0d0e15]">
+            <td class="px-6 py-2 pl-12 text-slate-400 text-xs font-mono truncate max-w-0">${esc(sessionLabel)}</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${((sess.tokens || 0) / 1000).toFixed(1)}K</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs whitespace-nowrap">${esc(sess.model || '—')}</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${sessCacheEff != null ? sessCacheEff + '%' : '—'}</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono whitespace-nowrap">${lastAct}</td>
+          </tr>`;
+      }).join('');
+
+      return headerRow + subheaderRow + sessionRows;
+    }).join('');
+  }
+
+  /* ── 프로젝트 행 accordion ─────────────────────── */
   document.querySelectorAll('.project-row').forEach(row => {
     row.addEventListener('click', () => {
-      const idx = parseInt(row.dataset.projectIdx);
-      let current = row.nextElementSibling;
-      let count = 0;
-      let hasHidden = false;
-
-      while (current && current.classList.contains('session-detail') && count < DUMMY_DATA.projects[idx].sessionCount) {
-        const isHidden = current.classList.contains('hidden');
-        if (isHidden) hasHidden = true;
-        current.classList.toggle('hidden');
-        count++;
-        current = current.nextElementSibling;
+      const count = parseInt(row.dataset.sessionCount) || 0;
+      let cur = row.nextElementSibling;
+      let n = 0;
+      let hadHidden = false;
+      while (cur && cur.classList.contains('session-detail') && n < count) {
+        if (cur.classList.contains('hidden')) hadHidden = true;
+        cur.classList.toggle('hidden');
+        n++;
+        cur = cur.nextElementSibling;
       }
-
       const arrow = row.querySelector('.accordion-arrow');
-      if (arrow) {
-        arrow.style.transform = hasHidden ? 'rotate(90deg)' : 'rotate(0deg)';
-      }
+      if (arrow) arrow.style.transform = hadHidden ? 'rotate(90deg)' : 'rotate(0deg)';
     });
   });
 
-  // 차트 툴팁 로직
+  /* ── 차트 툴팁 ─────────────────────────────────── */
   let tooltip = document.getElementById('chart-tooltip');
   if (!tooltip) {
     tooltip = document.createElement('div');
     tooltip.id = 'chart-tooltip';
     tooltip.className = 'fixed hidden text-xs text-[#f1f5f9] z-50 pointer-events-none';
-    tooltip.style.cssText = 'background: #1c1f2e; border: 1px solid #252838; border-radius: 6px; padding: 8px 12px;';
+    tooltip.style.cssText = 'background:#1c1f2e;border:1px solid #252838;border-radius:6px;padding:8px 12px;';
     document.body.appendChild(tooltip);
   }
-
-  const tooltipConfig = {
-    opus: { name: 'Opus', color: '#a78bfa' },
-    sonnet: { name: 'Sonnet', color: '#6046ff' },
-    haiku: { name: 'Haiku', color: '#312e81' }
-  };
-
   document.querySelectorAll('.chart-bar').forEach(bar => {
     bar.addEventListener('mouseenter', () => {
-      const tooltipType = bar.dataset.tooltip;
+      const color  = bar.dataset.color;
+      const model  = bar.dataset.model;
       const tokens = parseInt(bar.dataset.tokens);
-      const config = tooltipConfig[tooltipType];
-      tooltip.innerHTML = `<span style="color: ${config.color}; margin-right: 6px; font-size: 10px;">●</span>${config.name}: ${tokens.toLocaleString()}`;
+      tooltip.innerHTML = `<span style="color:${color};margin-right:6px;font-size:10px;">●</span>${esc(model)}: ${tokens.toLocaleString()}`;
       tooltip.classList.remove('hidden');
     });
-
     bar.addEventListener('mousemove', (e) => {
       tooltip.style.left = (e.clientX + 12) + 'px';
-      tooltip.style.top = (e.clientY - 12) + 'px';
+      tooltip.style.top  = (e.clientY - 12) + 'px';
     });
-
-    bar.addEventListener('mouseleave', () => {
-      tooltip.classList.add('hidden');
-    });
+    bar.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
   });
 }
 
+/* ── Usage SSE + snapshot ────────────────────────── */
+let _usageStream = null;
+
+function connectUsageStream() {
+  if (_usageStream) _usageStream.close();
+  _usageStream = new EventSource('/api/usage/stream');
+  _usageStream.addEventListener('usage_update', (e) => {
+    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
+  });
+  _usageStream.addEventListener('error', () => {
+    setTimeout(() => {
+      fetch('/api/usage/snapshot').then(r => r.json()).then(renderUsageTab).catch(() => {});
+    }, 2000);
+  });
+}
+
+function loadUsageSnapshot() {
+  fetch('/api/usage/snapshot')
+    .then(r => r.json())
+    .then(renderUsageTab)
+    .catch(() => renderUsageTab(null));
+}
