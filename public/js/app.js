@@ -108,6 +108,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         chatToggleBtn.classList.add('hover:bg-[#1c1f2e]');
       }
     }
+
+    // 대시보드 탭 렌더링
+    if (btn.dataset.tab === 'dashboard') {
+      renderUsageTab();
+    }
   });
 });
 
@@ -3061,3 +3066,185 @@ document.getElementById('view-community')?.addEventListener('click', e => {
   }
   if (e.target.closest('#btn-group-back')) showCommunityGroups();
 });
+
+/* ══════════════════════════════════════════════════
+   Usage Tab - Dummy Data & Rendering
+   ══════════════════════════════════════════════════ */
+
+const DUMMY_DATA = {
+  plan5h: { usedPercent: 42, resetMs: 2 * 3600000 + 14 * 60000 }, // 2h 14m
+  plan7d: { usedPercent: 18, resetMs: 5 * 86400000 + 3 * 3600000 }, // 5d 3h
+  weeklySessions: 12,
+  dailyTokens: [
+    { day: '12/20', date: 'MON', opus: 12400, sonnet: 45200, haiku: 8100 },
+    { day: '12/21', date: 'TUE', opus: 8900, sonnet: 62300, haiku: 12400 },
+    { day: '12/22', date: 'WED', opus: 22100, sonnet: 30400, haiku: 5600 },
+    { day: '12/23', date: 'THU', opus: 0, sonnet: 78200, haiku: 20100 },
+    { day: '12/24', date: 'FRI', opus: 15300, sonnet: 55400, haiku: 9800 },
+    { day: '12/25', date: 'SAT', opus: 5200, sonnet: 20100, haiku: 3400 },
+    { day: '12/26', date: 'SUN', opus: 18600, sonnet: 41300, haiku: 7200 },
+  ],
+  projects: [
+    {
+      name: 'mash-up-dashboard',
+      totalTokens: 125400,
+      sessionCount: 8,
+      cacheEfficiency: 76,
+      lastActivity: Date.now() - 2 * 60 * 60 * 1000, // 2h ago
+      sessions: [
+        { id: 'sess-001', name: 'Initialize project structure', model: 'Sonnet 4.6', tokens: 12400, cacheHit: 82, date: Date.now() - 5 * 60 * 60 * 1000 },
+        { id: 'sess-002', name: 'Add SSE streaming', model: 'Opus 4.6', tokens: 18200, cacheHit: 71, date: Date.now() - 3 * 60 * 60 * 1000 },
+        { id: 'sess-003', name: 'Fix chart rendering', model: 'Haiku 4.5', tokens: 3400, cacheHit: 65, date: Date.now() - 1 * 60 * 60 * 1000 },
+      ]
+    },
+    {
+      name: 'backend-api',
+      totalTokens: 89100,
+      sessionCount: 5,
+      cacheEfficiency: 62,
+      lastActivity: Date.now() - 4 * 60 * 60 * 1000,
+      sessions: [
+        { id: 'sess-011', name: 'Implement auth middleware', model: 'Sonnet 4.6', tokens: 28400, cacheHit: 58, date: Date.now() - 8 * 60 * 60 * 1000 },
+        { id: 'sess-012', name: 'Database migration', model: 'Opus 4.6', tokens: 34200, cacheHit: 67, date: Date.now() - 4 * 60 * 60 * 1000 },
+      ]
+    },
+    {
+      name: 'mobile-app',
+      totalTokens: 23900,
+      sessionCount: 3,
+      cacheEfficiency: 51,
+      lastActivity: Date.now() - 6 * 60 * 60 * 1000,
+      sessions: [
+        { id: 'sess-021', name: 'UI component refactor', model: 'Sonnet 4.6', tokens: 15600, cacheHit: 48, date: Date.now() - 12 * 60 * 60 * 1000 },
+        { id: 'sess-022', name: 'Fix navigation bug', model: 'Haiku 4.5', tokens: 8300, cacheHit: 56, date: Date.now() - 6 * 60 * 60 * 1000 },
+      ]
+    },
+  ]
+};
+
+function formatTimeRemaining(ms) {
+  const totalSecs = Math.floor(ms / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  
+  if (days > 0) return `${days}일 ${hours}시간 후 리셋`;
+  if (hours > 0) return `${hours}시간 ${mins}분 후 리셋`;
+  return `${mins}분 후 리셋`;
+}
+
+function getBarColor(percent) {
+  if (percent >= 90) return 'bg-[#ef4444]'; // red
+  if (percent >= 70) return 'bg-[#f97316]'; // orange
+  return 'bg-[#6046ff]'; // purple
+}
+
+function renderUsageTab() {
+  // 플랜 소진율 렌더링
+  const plan5hBar = document.getElementById('plan-5h-bar');
+  const plan5hPercent = document.getElementById('plan-5h-percent');
+  const plan5hReset = document.getElementById('plan-5h-reset');
+  const plan7dBar = document.getElementById('plan-7d-bar');
+  const plan7dPercent = document.getElementById('plan-7d-percent');
+  const plan7dReset = document.getElementById('plan-7d-reset');
+
+  const p5h = DUMMY_DATA.plan5h;
+  const p7d = DUMMY_DATA.plan7d;
+
+  plan5hPercent.textContent = `${p5h.usedPercent}%`;
+  plan5hBar.style.width = `${p5h.usedPercent}%`;
+  plan5hBar.className = `h-full rounded-full ${getBarColor(p5h.usedPercent)}`;
+  plan5hReset.textContent = formatTimeRemaining(p5h.resetMs);
+
+  plan7dPercent.textContent = `${p7d.usedPercent}%`;
+  plan7dBar.style.width = `${p7d.usedPercent}%`;
+  plan7dBar.className = `h-full rounded-full ${getBarColor(p7d.usedPercent)}`;
+  plan7dReset.textContent = formatTimeRemaining(p7d.resetMs);
+
+  // 세션 수
+  document.getElementById('stat-weekly-sessions').textContent = DUMMY_DATA.weeklySessions;
+
+  // 일별 스택 막대 렌더링
+  const chartContainer = document.getElementById('chart-stacked-bars');
+  const maxTokens = Math.max(...DUMMY_DATA.dailyTokens.map(d => d.opus + d.sonnet + d.haiku));
+  
+  chartContainer.innerHTML = DUMMY_DATA.dailyTokens.map(day => {
+    const total = day.opus + day.sonnet + day.haiku;
+    const opusH = total > 0 ? (day.opus / maxTokens) * 100 : 0;
+    const sonnetH = total > 0 ? (day.sonnet / maxTokens) * 100 : 0;
+    const haikuH = total > 0 ? (day.haiku / maxTokens) * 100 : 0;
+    
+    return `
+      <div class="flex-1 flex flex-col items-center">
+        <div class="w-full h-48 flex flex-col-reverse gap-0.5 mb-2">
+          ${opusH > 0 ? `<div class="w-full bg-[#a78bfa]" style="height: ${opusH}%;" title="Opus: ${day.opus}"></div>` : ''}
+          ${sonnetH > 0 ? `<div class="w-full bg-[#6046ff]" style="height: ${sonnetH}%;" title="Sonnet: ${day.sonnet}"></div>` : ''}
+          ${haikuH > 0 ? `<div class="w-full bg-[#312e81]" style="height: ${haikuH}%;" title="Haiku: ${day.haiku}"></div>` : ''}
+          ${total === 0 ? `<div class="w-full bg-[#1c1f2e] opacity-40 h-full"></div>` : ''}
+        </div>
+        <span class="text-[10px] font-mono text-slate-500">${day.date}</span>
+        <span class="text-[8px] text-slate-600">${day.day}</span>
+      </div>
+    `;
+  }).join('');
+
+  // 프로젝트 테이블 렌더링
+  const tableBody = document.getElementById('project-table-body');
+  tableBody.innerHTML = DUMMY_DATA.projects.flatMap((proj, idx) => {
+    const rows = [];
+    
+    // 프로젝트 헤더 행
+    rows.push(`
+      <tr class="hover:bg-[#1c1f2e] cursor-pointer project-row" data-project-idx="${idx}">
+        <td class="px-6 py-3 text-slate-300 flex items-center gap-2">
+          <span class="material-symbols-outlined text-[14px] transition-transform accordion-arrow">chevron_right</span>
+          ${esc(proj.name)}
+        </td>
+        <td class="px-6 py-3 text-right text-slate-300 font-mono">${(proj.totalTokens / 1000).toFixed(1)}K</td>
+        <td class="px-6 py-3 text-right text-slate-300">${proj.sessionCount}</td>
+        <td class="px-6 py-3 text-right">
+          <span class="font-mono ${proj.cacheEfficiency >= 70 ? 'text-emerald-400' : 'text-slate-400'}">${proj.cacheEfficiency}%</span>
+        </td>
+        <td class="px-6 py-3 text-right text-slate-500 text-xs">${formatTimeAgo(proj.lastActivity)}</td>
+      </tr>
+    `);
+
+    // 세션 상세 행 (숨겨짐)
+    const sessionHtml = proj.sessions.map(sess => `
+      <tr class="session-detail hidden">
+        <td class="px-6 py-2 pl-12 text-slate-400 text-xs font-mono">${esc(sess.name)}</td>
+        <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${new Date(sess.date).toLocaleDateString()} ${new Date(sess.date).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false })}</td>
+        <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${(sess.tokens / 1000).toFixed(1)}K</td>
+        <td class="px-6 py-2 text-right text-slate-400 text-xs">${sess.model}</td>
+        <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${sess.cacheHit}%</td>
+      </tr>
+    `).join('');
+    rows.push(sessionHtml);
+
+    return rows.join('');
+  }).join('');
+
+  // 프로젝트 행 클릭 이벤트
+  document.querySelectorAll('.project-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const idx = parseInt(row.dataset.projectIdx);
+      let current = row.nextElementSibling;
+      let count = 0;
+      let hasHidden = false;
+
+      while (current && current.classList.contains('session-detail') && count < DUMMY_DATA.projects[idx].sessionCount) {
+        const isHidden = current.classList.contains('hidden');
+        if (isHidden) hasHidden = true;
+        current.classList.toggle('hidden');
+        count++;
+        current = current.nextElementSibling;
+      }
+
+      const arrow = row.querySelector('.accordion-arrow');
+      if (arrow) {
+        arrow.style.transform = hasHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+      }
+    });
+  });
+}
+
