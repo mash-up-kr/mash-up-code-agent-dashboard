@@ -3176,10 +3176,10 @@ function renderUsageTab() {
     
     return `
       <div class="flex-1 flex flex-col items-center">
-        <div class="w-full h-48 flex flex-col-reverse gap-0.5 mb-2">
-          ${opusH > 0 ? `<div class="w-full bg-[#a78bfa]" style="height: ${opusH}%;" title="Opus: ${day.opus}"></div>` : ''}
-          ${sonnetH > 0 ? `<div class="w-full bg-[#6046ff]" style="height: ${sonnetH}%;" title="Sonnet: ${day.sonnet}"></div>` : ''}
-          ${haikuH > 0 ? `<div class="w-full bg-[#312e81]" style="height: ${haikuH}%;" title="Haiku: ${day.haiku}"></div>` : ''}
+        <div class="w-2/5 h-48 mx-auto flex flex-col-reverse gap-0.5 mb-2">
+          ${opusH > 0 ? `<div class="w-full bg-[#a78bfa] cursor-pointer chart-bar" style="height: ${opusH}%;" data-tooltip="opus" data-tokens="${day.opus}"></div>` : ''}
+          ${sonnetH > 0 ? `<div class="w-full bg-[#6046ff] cursor-pointer chart-bar" style="height: ${sonnetH}%;" data-tooltip="sonnet" data-tokens="${day.sonnet}"></div>` : ''}
+          ${haikuH > 0 ? `<div class="w-full bg-[#312e81] cursor-pointer chart-bar" style="height: ${haikuH}%;" data-tooltip="haiku" data-tokens="${day.haiku}"></div>` : ''}
           ${total === 0 ? `<div class="w-full bg-[#1c1f2e] opacity-40 h-full"></div>` : ''}
         </div>
         <span class="text-[10px] font-mono text-slate-500">${day.date}</span>
@@ -3244,6 +3244,41 @@ function renderUsageTab() {
       if (arrow) {
         arrow.style.transform = hasHidden ? 'rotate(90deg)' : 'rotate(0deg)';
       }
+    });
+  });
+
+  // 차트 툴팁 로직
+  let tooltip = document.getElementById('chart-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'chart-tooltip';
+    tooltip.className = 'fixed hidden text-xs text-[#f1f5f9] z-50 pointer-events-none';
+    tooltip.style.cssText = 'background: #1c1f2e; border: 1px solid #252838; border-radius: 6px; padding: 8px 12px;';
+    document.body.appendChild(tooltip);
+  }
+
+  const tooltipConfig = {
+    opus: { name: 'Opus', color: '#a78bfa' },
+    sonnet: { name: 'Sonnet', color: '#6046ff' },
+    haiku: { name: 'Haiku', color: '#312e81' }
+  };
+
+  document.querySelectorAll('.chart-bar').forEach(bar => {
+    bar.addEventListener('mouseenter', () => {
+      const tooltipType = bar.dataset.tooltip;
+      const tokens = parseInt(bar.dataset.tokens);
+      const config = tooltipConfig[tooltipType];
+      tooltip.innerHTML = `<span style="color: ${config.color}; margin-right: 6px; font-size: 10px;">●</span>${config.name}: ${tokens.toLocaleString()}`;
+      tooltip.classList.remove('hidden');
+    });
+
+    bar.addEventListener('mousemove', (e) => {
+      tooltip.style.left = (e.clientX + 12) + 'px';
+      tooltip.style.top = (e.clientY - 12) + 'px';
+    });
+
+    bar.addEventListener('mouseleave', () => {
+      tooltip.classList.add('hidden');
     });
   });
 }
