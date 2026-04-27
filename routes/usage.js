@@ -218,6 +218,7 @@ function applyRecord(r) {
 
 // ── JSONL incremental parser ─────────────────────
 const pendingFlush = [];
+const fileParseQueues = new Map();
 
 async function parseFile(filePath, sessionId, fallbackProjectPath) {
   let safe;
@@ -309,6 +310,25 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
   stmtUpsertOffset.run(safe, stat.size, new Date().toISOString());
 }
 
+function enqueueFileParse(filePath, sessionId, fallbackProjectPath) {
+  const queueKey = path.resolve(filePath);
+  const previous = fileParseQueues.get(queueKey) || Promise.resolve();
+  const current = previous
+    .catch(() => {})
+    .then(async () => {
+      await parseFile(filePath, sessionId, fallbackProjectPath);
+      broadcastUsage();
+    });
+
+  fileParseQueues.set(queueKey, current);
+  current.finally(() => {
+    if (fileParseQueues.get(queueKey) === current) {
+      fileParseQueues.delete(queueKey);
+    }
+  });
+  return current;
+}
+
 // ── SQLite flush ─────────────────────────────────
 function flushToSQLite() {
   if (pendingFlush.length === 0) return;
@@ -375,8 +395,7 @@ function startWatcher() {
       sessionId = parts[1];
     } else return;
 
-    await parseFile(filePath, sessionId, '');
-    broadcastUsage();
+    await enqueueFileParse(filePath, sessionId, '');
   };
 
   watcher.on('change', handle);
