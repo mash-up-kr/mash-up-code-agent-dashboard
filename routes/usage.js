@@ -3,7 +3,6 @@
 const fs      = require('fs');
 const path    = require('path');
 const os      = require('os');
-const rl      = require('readline');
 const { Router } = require('express');
 const Database   = require('better-sqlite3');
 const chokidar   = require('chokidar');
@@ -237,50 +236,68 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
   const isFirstRead = (offset === 0);
   const newRecords  = [];
   let sessionName   = null;
+  let processedOffset = offset;
 
-  await new Promise((resolve, reject) => {
-    const stream = fs.createReadStream(safe, { start: offset, encoding: 'utf8' });
-    const reader = rl.createInterface({ input: stream, crlfDelay: Infinity });
+  await new Promise((resolve) => {
+    const stream = fs.createReadStream(safe, { start: offset });
+    let remainder = Buffer.alloc(0);
 
-    reader.on('line', (line) => {
-      if (!line.trim()) return;
-      let rec;
-      try { rec = JSON.parse(line); } catch (_) { return; }
+    stream.on('data', (chunk) => {
+      const buf = Buffer.concat([remainder, chunk]);
+      let start = 0;
+      let nlIdx;
 
-      // 첫 읽기(offset=0)에서만 user 타입으로 세션 이름 추출
-      if (isFirstRead && !sessionName && rec.type === 'user') {
-        const contents = rec.message?.content;
-        if (Array.isArray(contents)) {
-          const text = contents.find(c => c.type === 'text' && c.text?.trim());
-          if (text) sessionName = text.text.trim().slice(0, 20);
-        } else if (typeof contents === 'string') {
-          sessionName = contents.trim().slice(0, 20);
+      while ((nlIdx = buf.indexOf(0x0A, start)) !== -1) {
+        const line = buf.subarray(start, nlIdx).toString('utf8');
+
+        if (line.trim()) {
+          let rec;
+          try { rec = JSON.parse(line); } catch (_) {
+            start = nlIdx + 1;
+            continue;
+          }
+
+          if (isFirstRead && !sessionName && rec.type === 'user') {
+            const contents = rec.message?.content;
+            if (Array.isArray(contents)) {
+              const text = contents.find(c => c.type === 'text' && c.text?.trim());
+              if (text) sessionName = text.text.trim().slice(0, 20);
+            } else if (typeof contents === 'string') {
+              sessionName = contents.trim().slice(0, 20);
+            }
+          }
+
+          if (rec.type === 'assistant') {
+            const usage = rec.message?.usage;
+            const rawModel = rec.message?.model;
+            if (usage && rawModel) {
+              const r = {
+                session_id:             sessionId,
+                sessionId:              rec.sessionId || rec.session_id || sessionId,
+                project_path:           rec.cwd || fallbackProjectPath || '',
+                model:                  normalizeModel(rawModel),
+                input_tokens:           usage.input_tokens || 0,
+                output_tokens:          usage.output_tokens || 0,
+                cache_creation_tokens:  usage.cache_creation_input_tokens || 0,
+                cache_read_tokens:      usage.cache_read_input_tokens || 0,
+                recorded_at:            rec.timestamp || new Date().toISOString(),
+              };
+              if (r.model) {
+                applyRecord(r);
+                newRecords.push(r);
+              }
+            }
+          }
         }
+
+        start = nlIdx + 1;
+        processedOffset = offset + start;
       }
 
-      if (rec.type !== 'assistant') return;
-      const usage = rec.message?.usage;
-      const rawModel = rec.message?.model;
-      if (!usage || !rawModel) return;
-
-      const r = {
-        session_id:             sessionId,
-        sessionId:              rec.sessionId || rec.session_id || sessionId,
-        project_path:           rec.cwd || fallbackProjectPath || '',
-        model:                  normalizeModel(rawModel),
-        input_tokens:           usage.input_tokens || 0,
-        output_tokens:          usage.output_tokens || 0,
-        cache_creation_tokens:  usage.cache_creation_input_tokens || 0,
-        cache_read_tokens:      usage.cache_read_input_tokens || 0,
-        recorded_at:            rec.timestamp || new Date().toISOString(),
-      };
-      if (!r.model) return; // normalizeModel이 null 반환한 경우 스킵
-      applyRecord(r);
-      newRecords.push(r);
+      remainder = buf.subarray(start);
     });
 
-    reader.on('close', resolve);
-    reader.on('error', reject);
+    stream.on('end', resolve);
     stream.on('error', (e) => {
       if (e.code === 'EACCES' || e.code === 'EPERM') {
         console.error('[usage] permission denied:', safe);
@@ -307,7 +324,9 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
     touchUsageState();
   }
 
-  stmtUpsertOffset.run(safe, stat.size, new Date().toISOString());
+  if (processedOffset > offset) {
+    stmtUpsertOffset.run(safe, processedOffset, new Date().toISOString());
+  }
 }
 
 function enqueueFileParse(filePath, sessionId, fallbackProjectPath) {
