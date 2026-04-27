@@ -9,7 +9,7 @@ const session        = require('express-session');
 const { initDB }     = require('./db');
 const communityRouter = require('./routes/community');
 const authRouter      = require('./routes/auth');
-const { router: usageRouter, init: initUsage } = require('./routes/usage');
+const { router: usageRouter, init: initUsage, updateRateLimits } = require('./routes/usage');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -410,6 +410,11 @@ function handleEvent(body) {
   const ts = Date.now();
 
   const entry = { type, pid, cwd, name, sid, ts };
+
+  if (type === 'statusline_update' || data?.rate_limits) {
+    updateRateLimits(data?.rate_limits || {});
+    return;
+  }
 
   if (pid && !sessions.has(pid) && type !== 'session_end') {
     let savedStartedAt = null;

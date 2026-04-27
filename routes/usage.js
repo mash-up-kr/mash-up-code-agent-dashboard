@@ -64,6 +64,13 @@ const stmtGetSession = db.prepare('SELECT session_name FROM usage_sessions WHERE
 
 // ── Memory state ────────────────────────────────
 const usageState = {
+  updatedAt: null,
+  weeklySessionCount: 0,
+  rateLimits: {
+    fiveHour: null,
+    sevenDay: null,
+    updatedAt: null,
+  },
   daily: {},    // { 'YYYY-MM-DD': { 'Sonnet 4.6': N, ... } }
   projects: {}, // { projectPath: { totalTokens, sessionCount, cacheEfficiency, lastActivity, sessions } }
 };
@@ -99,6 +106,54 @@ function broadcastUsage() {
   for (const res of usageClients) {
     try { res.write(payload); } catch (_) { usageClients.delete(res); }
   }
+}
+
+function touchUsageState(ts = new Date().toISOString()) {
+  usageState.updatedAt = ts;
+  usageState.weeklySessionCount = calculateWeeklySessionCount(usageState.projects);
+}
+
+function calculateWeeklySessionCount(projects) {
+  const threshold = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  let total = 0;
+  for (const proj of Object.values(projects || {})) {
+    for (const sess of Object.values(proj.sessions || {})) {
+      const ts = sess.lastActivity ? new Date(sess.lastActivity).getTime() : NaN;
+      if (Number.isFinite(ts) && ts >= threshold) total++;
+    }
+  }
+  return total;
+}
+
+function normalizeRateLimitWindow(window) {
+  if (!window) return null;
+  const usedPercentage = Number(
+    window.used_percentage ??
+    window.usedPercentage
+  );
+  const resetsAtRaw = window.resets_at ?? window.resetsAt ?? null;
+  let resetsAt = null;
+  if (typeof resetsAtRaw === 'number' && Number.isFinite(resetsAtRaw)) {
+    resetsAt = new Date(resetsAtRaw * 1000).toISOString();
+  } else if (typeof resetsAtRaw === 'string') {
+    const numeric = Number(resetsAtRaw);
+    resetsAt = Number.isFinite(numeric)
+      ? new Date(numeric * 1000).toISOString()
+      : resetsAtRaw;
+  }
+  return {
+    usedPercentage: Number.isFinite(usedPercentage) ? usedPercentage : null,
+    resetsAt,
+  };
+}
+
+function updateRateLimits(rateLimits) {
+  usageState.rateLimits = {
+    fiveHour: normalizeRateLimitWindow(rateLimits?.five_hour),
+    sevenDay: normalizeRateLimitWindow(rateLimits?.seven_day),
+    updatedAt: new Date().toISOString(),
+  };
+  broadcastUsage();
 }
 
 // ── State update ─────────────────────────────────
@@ -158,6 +213,7 @@ function applyRecord(r) {
   proj._cacheNum  += cacheRead;
   proj._cacheDen  += inputTok + cacheCreate + cacheRead;
   proj.cacheEfficiency = proj._cacheDen > 0 ? proj._cacheNum / proj._cacheDen : null;
+  touchUsageState();
 }
 
 // ── JSONL incremental parser ─────────────────────
@@ -247,6 +303,7 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
 
   if (newRecords.length > 0) {
     pendingFlush.push(...newRecords);
+    touchUsageState();
   }
 
   stmtUpsertOffset.run(safe, stat.size, new Date().toISOString());
@@ -351,4 +408,4 @@ async function init() {
   startWatcher();
 }
 
-module.exports = { router, init };
+module.exports = { router, init, updateRateLimits };

@@ -3068,63 +3068,10 @@ document.getElementById('view-community')?.addEventListener('click', e => {
   if (e.target.closest('#btn-group-back')) showCommunityGroups();
 });
 
-/* ══════════════════════════════════════════════════
-   Usage Tab - Dummy Data & Rendering
-   ══════════════════════════════════════════════════ */
-
-const DUMMY_DATA = {
-  plan5h: { usedPercent: 42, resetMs: 2 * 3600000 + 14 * 60000 }, // 2h 14m
-  plan7d: { usedPercent: 18, resetMs: 5 * 86400000 + 3 * 3600000 }, // 5d 3h
-  weeklySessions: 12,
-  dailyTokens: [
-    { day: '12/20', date: 'MON', opus: 12400, sonnet: 45200, haiku: 8100 },
-    { day: '12/21', date: 'TUE', opus: 8900, sonnet: 62300, haiku: 12400 },
-    { day: '12/22', date: 'WED', opus: 22100, sonnet: 30400, haiku: 5600 },
-    { day: '12/23', date: 'THU', opus: 0, sonnet: 78200, haiku: 20100 },
-    { day: '12/24', date: 'FRI', opus: 15300, sonnet: 55400, haiku: 9800 },
-    { day: '12/25', date: 'SAT', opus: 5200, sonnet: 20100, haiku: 3400 },
-    { day: '12/26', date: 'SUN', opus: 18600, sonnet: 41300, haiku: 7200 },
-  ],
-  projects: [
-    {
-      name: 'mash-up-dashboard',
-      totalTokens: 125400,
-      sessionCount: 8,
-      cacheEfficiency: 76,
-      lastActivity: Date.now() - 2 * 60 * 60 * 1000, // 2h ago
-      sessions: [
-        { id: 'sess-001', name: 'Initialize project structure', model: 'Sonnet 4.6', tokens: 12400, cacheHit: 82, date: Date.now() - 5 * 60 * 60 * 1000 },
-        { id: 'sess-002', name: 'Add SSE streaming', model: 'Opus 4.6', tokens: 18200, cacheHit: 71, date: Date.now() - 3 * 60 * 60 * 1000 },
-        { id: 'sess-003', name: 'Fix chart rendering', model: 'Haiku 4.5', tokens: 3400, cacheHit: 65, date: Date.now() - 1 * 60 * 60 * 1000 },
-      ]
-    },
-    {
-      name: 'backend-api',
-      totalTokens: 89100,
-      sessionCount: 5,
-      cacheEfficiency: 62,
-      lastActivity: Date.now() - 4 * 60 * 60 * 1000,
-      sessions: [
-        { id: 'sess-011', name: 'Implement auth middleware', model: 'Sonnet 4.6', tokens: 28400, cacheHit: 58, date: Date.now() - 8 * 60 * 60 * 1000 },
-        { id: 'sess-012', name: 'Database migration', model: 'Opus 4.6', tokens: 34200, cacheHit: 67, date: Date.now() - 4 * 60 * 60 * 1000 },
-      ]
-    },
-    {
-      name: 'mobile-app',
-      totalTokens: 23900,
-      sessionCount: 3,
-      cacheEfficiency: 51,
-      lastActivity: Date.now() - 6 * 60 * 60 * 1000,
-      sessions: [
-        { id: 'sess-021', name: 'UI component refactor', model: 'Sonnet 4.6', tokens: 15600, cacheHit: 48, date: Date.now() - 12 * 60 * 60 * 1000 },
-        { id: 'sess-022', name: 'Fix navigation bug', model: 'Haiku 4.5', tokens: 8300, cacheHit: 56, date: Date.now() - 6 * 60 * 60 * 1000 },
-      ]
-    },
-  ]
-};
-
 function formatTimeRemaining(ms) {
+  if (!Number.isFinite(ms)) return '리셋 정보 없음';
   const totalSecs = Math.floor(ms / 1000);
+  if (totalSecs <= 0) return '곧 리셋';
   const days = Math.floor(totalSecs / 86400);
   const hours = Math.floor((totalSecs % 86400) / 3600);
   const mins = Math.floor((totalSecs % 3600) / 60);
@@ -3164,7 +3111,7 @@ function toLocalDateKey(input) {
 }
 
 function formatUsageUpdatedAgo(ts) {
-  if (!ts) return '--';
+  if (!Number.isFinite(ts)) return '갱신 정보 없음';
   const diff = Math.floor((Date.now() - ts) / 1000);
   if (diff < 10) return '방금 전 갱신';
   if (diff < 60) return `${diff}초 전 갱신`;
@@ -3176,8 +3123,10 @@ function formatUsageUpdatedAgo(ts) {
 function updateUsageRefreshBadges() {
   const label = formatUsageUpdatedAgo(usageLastUpdatedAt);
   const html = `<span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>${esc(label)}`;
+  const weeklyBadge = document.getElementById('usage-weekly-updated-at');
   const chartBadge = document.getElementById('usage-chart-updated-at');
   const projectBadge = document.getElementById('usage-project-updated-at');
+  if (weeklyBadge) weeklyBadge.innerHTML = html;
   if (chartBadge) chartBadge.innerHTML = html;
   if (projectBadge) projectBadge.innerHTML = html;
 }
@@ -3250,31 +3199,37 @@ function formatUsageLastActivity(isoOrTs) {
   return formatTimeAgo(ts);
 }
 
+function getResetMs(resetsAt) {
+  if (!resetsAt) return NaN;
+  return new Date(resetsAt).getTime() - Date.now();
+}
+
 function renderUsageTab(data) {
-  usageLastUpdatedAt = Date.now();
+  usageLastUpdatedAt = data?.updatedAt ? new Date(data.updatedAt).getTime() : NaN;
   updateUsageRefreshBadges();
   if (!usageBadgeTimer) {
     usageBadgeTimer = setInterval(updateUsageRefreshBadges, 10000);
   }
 
-  /* ── 플랜 소진율 (범위 외 — 더미 유지) ─────────── */
-  const p5h = DUMMY_DATA.plan5h;
-  const p7d = DUMMY_DATA.plan7d;
+  /* ── 플랜 소진율 ──────────────────────────────── */
+  const p5h = data?.rateLimits?.fiveHour || {};
+  const p7d = data?.rateLimits?.sevenDay || {};
   const plan5hBar     = document.getElementById('plan-5h-bar');
   const plan5hPercent = document.getElementById('plan-5h-percent');
   const plan5hReset   = document.getElementById('plan-5h-reset');
   const plan7dBar     = document.getElementById('plan-7d-bar');
   const plan7dPercent = document.getElementById('plan-7d-percent');
   const plan7dReset   = document.getElementById('plan-7d-reset');
-  plan5hPercent.textContent = `${p5h.usedPercent}%`;
-  plan5hBar.style.width = `${p5h.usedPercent}%`;
-  plan5hBar.className = `h-full rounded-full ${getBarColor(p5h.usedPercent)}`;
-  plan5hReset.textContent = formatTimeRemaining(p5h.resetMs);
-  plan7dPercent.textContent = `${p7d.usedPercent}%`;
-  plan7dBar.style.width = `${p7d.usedPercent}%`;
-  plan7dBar.className = `h-full rounded-full ${getBarColor(p7d.usedPercent)}`;
-  plan7dReset.textContent = formatTimeRemaining(p7d.resetMs);
-  document.getElementById('stat-weekly-sessions').textContent = DUMMY_DATA.weeklySessions;
+  const p5hUsedPercent = Number.isFinite(p5h.usedPercentage) ? p5h.usedPercentage : 0;
+  const p7dUsedPercent = Number.isFinite(p7d.usedPercentage) ? p7d.usedPercentage : 0;
+  plan5hPercent.textContent = `${Math.round(p5hUsedPercent)}%`;
+  plan5hBar.style.width = `${Math.max(0, Math.min(100, p5hUsedPercent))}%`;
+  plan5hBar.className = `h-full rounded-full ${getBarColor(p5hUsedPercent)}`;
+  plan5hReset.textContent = formatTimeRemaining(getResetMs(p5h.resetsAt));
+  plan7dPercent.textContent = `${Math.round(p7dUsedPercent)}%`;
+  plan7dBar.style.width = `${Math.max(0, Math.min(100, p7dUsedPercent))}%`;
+  plan7dBar.className = `h-full rounded-full ${getBarColor(p7dUsedPercent)}`;
+  plan7dReset.textContent = formatTimeRemaining(getResetMs(p7d.resetsAt));
 
   /* ── 일별 스택 막대 ────────────────────────────── */
   const daily          = data?.daily || {};
@@ -3317,6 +3272,7 @@ function renderUsageTab(data) {
 
   /* ── 프로젝트 테이블 ───────────────────────────── */
   const rawProjects = data?.projects || {};
+  document.getElementById('stat-weekly-sessions').textContent = data?.weeklySessionCount ?? 0;
   const projectEntries = Object.entries(rawProjects)
     .sort((a, b) => (b[1].lastActivity || '') > (a[1].lastActivity || '') ? 1 : -1);
 
