@@ -3151,6 +3151,9 @@ function modelColor(name) {
   return m ? m.color : '#6b7280';
 }
 
+let usageLastUpdatedAt = 0;
+let usageBadgeTimer = null;
+
 function toLocalDateKey(input) {
   const d = input instanceof Date ? input : new Date(input);
   if (Number.isNaN(d.getTime())) return '';
@@ -3158,6 +3161,34 @@ function toLocalDateKey(input) {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatUsageUpdatedAgo(ts) {
+  if (!ts) return '--';
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 10) return '방금 전 갱신';
+  if (diff < 60) return `${diff}초 전 갱신`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}분 전 갱신`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전 갱신`;
+  return `${Math.floor(diff / 86400)}일 전 갱신`;
+}
+
+function updateUsageRefreshBadges() {
+  const label = formatUsageUpdatedAgo(usageLastUpdatedAt);
+  const html = `<span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>${esc(label)}`;
+  const chartBadge = document.getElementById('usage-chart-updated-at');
+  const projectBadge = document.getElementById('usage-project-updated-at');
+  if (chartBadge) chartBadge.innerHTML = html;
+  if (projectBadge) projectBadge.innerHTML = html;
+}
+
+function positionUsageBadgeTooltip(tooltip, badge) {
+  const rect = badge.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.max(8, rect.left - tooltip.offsetWidth - gap);
+  const top = Math.max(8, rect.top - tooltip.offsetHeight - gap);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
 }
 
 /* ── Build last-7-days rows from API daily state ── */
@@ -3220,6 +3251,12 @@ function formatUsageLastActivity(isoOrTs) {
 }
 
 function renderUsageTab(data) {
+  usageLastUpdatedAt = Date.now();
+  updateUsageRefreshBadges();
+  if (!usageBadgeTimer) {
+    usageBadgeTimer = setInterval(updateUsageRefreshBadges, 10000);
+  }
+
   /* ── 플랜 소진율 (범위 외 — 더미 유지) ─────────── */
   const p5h = DUMMY_DATA.plan5h;
   const p7d = DUMMY_DATA.plan7d;
@@ -3362,8 +3399,8 @@ function renderUsageTab(data) {
   if (!tooltip) {
     tooltip = document.createElement('div');
     tooltip.id = 'chart-tooltip';
-    tooltip.className = 'fixed hidden text-xs text-[#f1f5f9] z-50 pointer-events-none';
-    tooltip.style.cssText = 'background:#1c1f2e;border:1px solid #252838;border-radius:6px;padding:8px 12px;';
+    tooltip.className = 'fixed hidden text-[11px] leading-snug text-[#f1f5f9] z-50 pointer-events-none max-w-[320px] whitespace-normal';
+    tooltip.style.cssText = 'background:#1c1f2e;border:1px solid #252838;border-radius:6px;padding:6px 10px;';
     document.body.appendChild(tooltip);
   }
   document.querySelectorAll('.chart-bar').forEach(bar => {
@@ -3379,6 +3416,17 @@ function renderUsageTab(data) {
       tooltip.style.top  = (e.clientY - 12) + 'px';
     });
     bar.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
+  });
+
+  document.querySelectorAll('.usage-badge-tooltip').forEach((badge) => {
+    if (badge.dataset.tooltipBound === 'true') return;
+    badge.dataset.tooltipBound = 'true';
+    badge.addEventListener('mouseenter', () => {
+      tooltip.innerHTML = esc(badge.dataset.tooltipContent || '');
+      tooltip.classList.remove('hidden');
+      positionUsageBadgeTooltip(tooltip, badge);
+    });
+    badge.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
   });
 }
 

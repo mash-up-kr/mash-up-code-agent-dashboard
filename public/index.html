@@ -323,9 +323,16 @@
           <span class="w-1 h-4 bg-[#6046ff] rounded-full"></span>
           주간 일별 토큰 사용량
         </h3>
-        <span class="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>실시간
+        <div class="flex items-center gap-2">
+          <span id="usage-chart-updated-at" class="text-[10px] font-mono text-slate-500 bg-slate-500/10 px-2 py-0.5 rounded border border-slate-500/20 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>-- 갱신
         </span>
+          <button
+            type="button"
+            class="w-4 h-4 rounded-full border border-slate-500/20 bg-slate-500/10 text-slate-500 text-[9px] leading-none flex items-center justify-center cursor-help usage-badge-tooltip"
+            data-tooltip-content="에이전트의 로그 기록 시점에 따라 지연이 발생할 수 있습니다."
+            aria-label="사용량 반영 기준 설명">?</button>
+        </div>
       </div>
 
       <!-- 스택 막대 차트 -->
@@ -357,9 +364,16 @@
           <span class="w-1 h-4 bg-[#6046ff] rounded-full"></span>
           프로젝트별 토큰 효율
         </h3>
-        <span class="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>실시간
-        </span>
+        <div class="flex items-center gap-2">
+          <span id="usage-project-updated-at" class="text-[10px] font-mono text-slate-500 bg-slate-500/10 px-2 py-0.5 rounded border border-slate-500/20 flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>-- 갱신
+          </span>
+          <button
+            type="button"
+            class="w-4 h-4 rounded-full border border-slate-500/20 bg-slate-500/10 text-slate-500 text-[9px] leading-none flex items-center justify-center cursor-help usage-badge-tooltip"
+            data-tooltip-content="에이전트의 로그 기록 시점에 따라 지연이 발생할 수 있습니다."
+            aria-label="사용량 반영 기준 설명">?</button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm table-fixed">
