@@ -44,8 +44,9 @@ const stmtInsertRecord = db.prepare(`
     (@session_id, @project_path, @model, @input_tokens, @output_tokens,
      @cache_creation_tokens, @cache_read_tokens, @recorded_at)
 `);
-const stmtInsertMany = db.transaction((rows) => {
+const stmtFlushAndUpdateOffset = db.transaction((rows, filePath, newOffset, now) => {
   for (const r of rows) stmtInsertRecord.run(r);
+  stmtUpsertOffset.run(filePath, newOffset, now);
 });
 const stmtUpsertOffset = db.prepare(`
   INSERT INTO file_offsets (file_path, last_offset, last_synced_at)
@@ -241,8 +242,10 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
   await new Promise((resolve) => {
     const stream = fs.createReadStream(safe, { start: offset });
     let remainder = Buffer.alloc(0);
+    let totalBytesRead = 0;
 
     stream.on('data', (chunk) => {
+      totalBytesRead += chunk.length;
       const buf = Buffer.concat([remainder, chunk]);
       let start = 0;
       let nlIdx;
@@ -291,10 +294,10 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
         }
 
         start = nlIdx + 1;
-        processedOffset = offset + start;
       }
 
       remainder = buf.subarray(start);
+      processedOffset = offset + totalBytesRead - remainder.length;
     });
 
     stream.on('end', resolve);
@@ -319,13 +322,9 @@ async function parseFile(filePath, sessionId, fallbackProjectPath) {
     }
   }
 
-  if (newRecords.length > 0) {
-    stmtInsertMany(newRecords);
-    touchUsageState();
-  }
-
   if (processedOffset > offset) {
-    stmtUpsertOffset.run(safe, processedOffset, new Date().toISOString());
+    stmtFlushAndUpdateOffset(newRecords, safe, processedOffset, new Date().toISOString());
+    if (newRecords.length > 0) touchUsageState();
   }
 }
 
@@ -368,7 +367,7 @@ async function scanAllJsonlFiles() {
     for (const entry of entries) {
       if (entry.endsWith('.jsonl')) {
         const sessionId = entry.replace('.jsonl', '');
-        await parseFile(path.join(pPath, entry), sessionId, '');
+        await enqueueFileParse(path.join(pPath, entry), sessionId, '');
       }
       // subagents
       const subDir = path.join(pPath, entry, 'subagents');
@@ -376,7 +375,7 @@ async function scanAllJsonlFiles() {
         const subs = fs.readdirSync(subDir);
         for (const sub of subs) {
           if (sub.endsWith('.jsonl')) {
-            await parseFile(path.join(subDir, sub), entry, '');
+            await enqueueFileParse(path.join(subDir, sub), entry, '');
           }
         }
       } catch (_) {}
