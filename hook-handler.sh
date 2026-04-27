@@ -31,8 +31,11 @@ case "$EVENT_TYPE" in
   StatusLine)        EVENT_TYPE="statusline_update" ;;
 esac
 
-# Extract Claude session_id from hook stdin — use as stable unique session identifier
-SID=$(echo "$INPUT" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Extract Claude session_id from hook stdin — tolerate JSON spacing differences
+SID=$(printf '%s' "$INPUT" \
+  | grep -Eo '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+  | head -1 \
+  | sed -E 's/^"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"$/\1/')
 
 PAYLOAD="{\"event\":\"$EVENT_TYPE\",\"session\":{\"pid\":\"$SID\",\"cwd\":\"$SESSION_CWD\",\"name\":\"$SESSION_NAME\",\"sid\":\"$SID\"},\"data\":$INPUT}"
 
