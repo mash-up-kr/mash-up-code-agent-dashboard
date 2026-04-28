@@ -2,6 +2,7 @@
 
 const { Router } = require('express');
 const { pool }   = require('../db');
+const chat       = require('./chat');
 
 const router = Router();
 
@@ -85,6 +86,7 @@ router.post('/groups', requireAuth, async (req, res) => {
     );
 
     await conn.commit();
+    chat.notifyMemberJoined(groupId, { memberId, nickname: nickname.trim() });
     res.status(201).json({ groupId, name: name.trim(), code });
   } catch (e) {
     await conn.rollback();
@@ -165,6 +167,7 @@ router.post('/groups/join', requireAuth, async (req, res) => {
     );
 
     await conn.commit();
+    chat.notifyMemberJoined(group.id, { memberId, nickname: nickname.trim() });
     res.status(201).json({ groupId: group.id, name: group.name });
   } catch (e) {
     await conn.rollback();
@@ -186,13 +189,14 @@ router.delete('/groups/:groupId/leave', requireAuth, async (req, res) => {
     await conn.beginTransaction();
 
     const [existing] = await conn.execute(
-      'SELECT id FROM group_members WHERE group_id = ? AND member_id = ?',
+      'SELECT id, nickname FROM group_members WHERE group_id = ? AND member_id = ?',
       [groupId, memberId]
     );
     if (existing.length === 0) {
       await conn.rollback();
       return res.status(404).json({ error: '해당 그룹의 멤버가 아닙니다.' });
     }
+    const leavingNickname = existing[0].nickname;
 
     await conn.execute(
       'DELETE FROM group_members WHERE group_id = ? AND member_id = ?',
@@ -208,6 +212,7 @@ router.delete('/groups/:groupId/leave', requireAuth, async (req, res) => {
     }
 
     await conn.commit();
+    chat.notifyMemberLeft(groupId, { memberId, nickname: leavingNickname });
     res.json({ ok: true });
   } catch (e) {
     await conn.rollback();
