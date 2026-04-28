@@ -413,20 +413,27 @@ function startWatcher() {
   const watcher = chokidar.watch(path.join(CLAUDE_PROJECTS_DIR, '**', '*.jsonl'), {
     persistent: true,
     ignoreInitial: true,
-    awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 },
+    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
   });
 
-  const handle = async (filePath) => {
-    const rel   = path.relative(CLAUDE_PROJECTS_DIR, filePath);
-    const parts = rel.split(path.sep);
-    let sessionId;
-    if (parts.length === 2 && parts[1].endsWith('.jsonl')) {
-      sessionId = parts[1].replace('.jsonl', '');
-    } else if (parts.length >= 4 && parts[2] === 'subagents') {
-      sessionId = parts[1];
-    } else return;
+  // 같은 파일의 연속 이벤트를 2초로 debounce — SQLite 쓰기 빈도 감소
+  const debounceTimers = new Map();
 
-    await enqueueFileParse(filePath, sessionId, '');
+  const handle = (filePath) => {
+    if (debounceTimers.has(filePath)) clearTimeout(debounceTimers.get(filePath));
+    debounceTimers.set(filePath, setTimeout(async () => {
+      debounceTimers.delete(filePath);
+      const rel   = path.relative(CLAUDE_PROJECTS_DIR, filePath);
+      const parts = rel.split(path.sep);
+      let sessionId;
+      if (parts.length === 2 && parts[1].endsWith('.jsonl')) {
+        sessionId = parts[1].replace('.jsonl', '');
+      } else if (parts.length >= 4 && parts[2] === 'subagents') {
+        sessionId = parts[1];
+      } else return;
+
+      await enqueueFileParse(filePath, sessionId, '');
+    }, 2000));
   };
 
   watcher.on('change', handle);
