@@ -3036,20 +3036,162 @@ function showCommunityGroups() {
   document.getElementById('community-chat')?.classList.add('hidden');
 }
 
-function renderMemberGrid(memberCount) {
+const MOCK_MEMBERS = [
+  { memberId: 1, nickname: 'dev_kim',    isOnline: true,  toolCallCount: 1284, sessionCount: 37, cwd: '/Users/kim/projects/mashup-app',     activity: [42, 78, 55, 91, 110, 134, 98]  },
+  { memberId: 2, nickname: 'alpha_lee',  isOnline: true,  toolCallCount: 892,  sessionCount: 21, cwd: '/home/lee/backend-server',            activity: [20, 35, 60, 48, 72, 88, 65]   },
+  { memberId: 3, nickname: 'mace_01',    isOnline: false, toolCallCount: 3041, sessionCount: 58, cwd: null,                                  activity: [120, 95, 140, 88, 102, 76, 30] },
+  { memberId: 4, nickname: 'nova_park',  isOnline: true,  toolCallCount: 447,  sessionCount: 12, cwd: '/Users/park/claude-dashboard',        activity: [10, 22, 18, 44, 38, 55, 42]   },
+  { memberId: 5, nickname: 'sys_choi',   isOnline: false, toolCallCount: 205,  sessionCount: 8,  cwd: null,                                  activity: [30, 12, 25, 8, 15, 20, 5]     },
+  { memberId: 6, nickname: 'core_jung',  isOnline: true,  toolCallCount: 1677, sessionCount: 44, cwd: '/workspace/data-pipeline',            activity: [55, 88, 102, 120, 145, 160, 178] },
+  { memberId: 7, nickname: 'byte_han',   isOnline: true,  toolCallCount: 311,  sessionCount: 9,  cwd: '/home/han/api-gateway',               activity: [5, 8, 12, 6, 40, 85, 45]      },
+  { memberId: 8, nickname: 'null_oh',    isOnline: false, toolCallCount: 728,  sessionCount: 27, cwd: null,                                  activity: [60, 55, 70, 65, 58, 52, 48]   },
+  { memberId: 9, nickname: 'loop_yoon',  isOnline: true,  toolCallCount: 2190, sessionCount: 61, cwd: '/Users/yoon/ml-pipeline',             activity: [80, 110, 95, 130, 120, 145, 160] },
+];
+
+function getMemberStatus(m) {
+  if (!m.isOnline) return { label: 'IDLE', color: '#6b7280', bg: 'rgba(107,114,128,0.15)', trend: 'FLAT', lineColor: '#2a2c3e' };
+
+  const act = m.activity || [];
+  if (act.length < 3) return { label: 'CONNECTED', color: '#45dfa4', bg: 'rgba(69,223,164,0.12)', trend: 'NOMINAL', lineColor: '#6046ff' };
+
+  const half  = Math.floor(act.length / 2);
+  const first = act.slice(0, half).reduce((a, b) => a + b, 0) / half;
+  const last  = act.slice(half).reduce((a, b) => a + b, 0) / (act.length - half);
+  const max   = Math.max(...act);
+  const min   = Math.min(...act);
+  const variance = (max - min) / (max || 1);
+
+  if (variance > 0.65 && last > 40)
+    return { label: 'ACTIVE',      color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'ERRATIC', lineColor: '#45dfa4' };
+  if (last > first * 1.35)
+    return { label: 'PROCESSING',  color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', trend: 'RISING',  lineColor: '#f59e0b' };
+  if (last < first * 0.65)
+    return { label: 'SYNCING',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', trend: 'STEADY',  lineColor: '#60a5fa' };
+  return   { label: 'CONNECTED',   color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'NOMINAL', lineColor: '#6046ff' };
+}
+
+function renderSparkline(activity, lineColor, uid) {
+  if (!activity || activity.length < 2) return '<div class="flex-1"></div>';
+  const W = 200, H = 64, pad = 4;
+  const max = Math.max(...activity, 1);
+
+  const pts = activity.map((v, i) => {
+    const x = pad + (i / (activity.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((v / max) * (H - pad * 2));
+    return [x, y];
+  });
+
+  const polyline = pts.map(([x, y]) => `${x},${y}`).join(' ');
+
+  const fillPath = [
+    `M ${pts[0][0]},${H}`,
+    ...pts.map(([x, y]) => `L ${x},${y}`),
+    `L ${pts[pts.length - 1][0]},${H}`,
+    'Z',
+  ].join(' ');
+
+  const gradId = `sg_${uid}`;
+  return `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="${lineColor}" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${fillPath}" fill="url(#${gradId})"/>
+      <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.8"
+                stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+}
+
+function renderMemberCard(m) {
+  const status  = getMemberStatus(m);
+  const cwdFull = m.cwd || null;
+  const glowVia = m.isOnline ? 'via-[#45dfa4]/30' : 'via-[#252838]/60';
+
+  return `
+    <div class="member-card bg-[#0b0c17] border border-[#1e2030] rounded-xl p-3.5 flex flex-col gap-2.5
+                hover:border-[#6046ff]/50 transition-all duration-200 cursor-pointer relative overflow-hidden"
+         data-member-id="${m.memberId}">
+
+      <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent ${glowVia} to-transparent"></div>
+
+      <!-- 헤더 -->
+      <div class="flex items-start gap-2.5">
+        <div class="relative flex-shrink-0">
+          <div class="w-10 h-10 rounded-lg bg-[#13151f] border border-[#252838] flex items-center justify-center overflow-hidden">
+            <img src="/img/mascot_waiting.png" alt="mascot"
+                 class="w-8 h-8 object-contain ${m.isOnline ? '' : 'opacity-30 grayscale'}">
+          </div>
+          <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#0b0c17]"
+                style="background:${m.isOnline ? '#45dfa4' : '#374151'}"></span>
+        </div>
+        <div class="flex-1 min-w-0 pt-0.5">
+          <div class="text-[13px] font-bold text-slate-200 font-mono truncate leading-tight">${escapeHtml(m.nickname)}</div>
+          <span class="inline-block mt-1 px-1.5 py-px rounded text-[9px] font-mono font-bold tracking-widest"
+                style="background:${status.bg};color:${status.color}">${status.label}</span>
+        </div>
+        <div class="flex-shrink-0 pt-0.5">
+          <span class="text-[9px] font-mono text-slate-600 tracking-widest">TREND:&nbsp;<span class="text-slate-400">${status.trend}</span></span>
+        </div>
+      </div>
+
+      <div class="h-px bg-[#1e2030]"></div>
+
+      <!-- 바디: 차트(좌) + 지표(우) -->
+      <div class="flex gap-2.5 flex-1 min-h-0" style="min-height:80px">
+
+        <!-- Activity 차트 -->
+        <div class="flex flex-col gap-1 flex-1 min-w-0">
+          <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Activity Trend</span>
+          <div class="flex-1 min-h-0">
+            ${renderSparkline(m.activity, status.lineColor, m.memberId)}
+          </div>
+        </div>
+
+        <!-- 지표 박스 -->
+        <div class="flex flex-col gap-1.5" style="width:38%">
+          <div class="bg-[#13151f] border border-[#1e2030] rounded-lg px-2.5 py-2 flex flex-col flex-1">
+            <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Tool Calls</span>
+            <span class="text-[22px] font-bold font-mono text-[#c6bfff] leading-none mt-0.5">${m.toolCallCount.toLocaleString()}</span>
+          </div>
+          <div class="bg-[#13151f] border border-[#1e2030] rounded-lg px-2.5 py-2 flex flex-col flex-1">
+            <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Sessions</span>
+            <span class="text-[22px] font-bold font-mono text-[#c6bfff] leading-none mt-0.5">${m.sessionCount.toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- CWD -->
+      <div class="bg-[#13151f] border border-[#1e2030] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 min-w-0">
+        <span class="material-symbols-outlined flex-shrink-0" style="font-size:12px;color:#4b5563">terminal</span>
+        <span class="text-[9px] font-mono text-slate-500 truncate">${cwdFull ? escapeHtml(cwdFull) : '—'}</span>
+      </div>
+
+    </div>`;
+}
+
+function renderMemberGrid(members) {
   const grid = document.getElementById('member-grid');
   if (!grid) return;
-  grid.innerHTML = Array.from({ length: memberCount }, () => `
-    <div class="bg-[#13151f] border border-[#252838] rounded-xl flex flex-col items-center justify-center hover:border-[#6046ff]/30 transition-colors cursor-pointer">
-      <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-40">
-      <span class="text-[10px] text-slate-600 mt-3">대기 중</span>
-    </div>`).join('');
+
+  if (!members || members.length === 0) {
+    grid.innerHTML = `
+      <div class="col-span-3 flex flex-col items-center justify-center text-slate-600 gap-3 py-16">
+        <img src="/img/mascot_waiting.png" alt="대기 중" class="w-16 h-16 object-contain opacity-20">
+        <span class="text-xs">멤버가 없습니다.</span>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = members.map(renderMemberCard).join('');
 }
 
 function showCommunityChat(memberCount) {
   document.getElementById('community-groups')?.classList.add('hidden');
   document.getElementById('community-chat')?.classList.remove('hidden');
-  renderMemberGrid(memberCount ?? 1);
+  renderMemberGrid(MOCK_MEMBERS.slice(0, Math.min(memberCount ?? 9, 9)));
 }
 
 document.getElementById('view-community')?.addEventListener('click', e => {

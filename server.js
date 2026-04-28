@@ -7,8 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const session        = require('express-session');
 const { initDB }     = require('./db');
-const communityRouter = require('./routes/community');
-const authRouter      = require('./routes/auth');
+const communityRouter        = require('./routes/community');
+const authRouter             = require('./routes/auth');
+const { router: metricsRouter } = require('./routes/metrics');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -805,6 +806,7 @@ app.get('/api/events', (req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/metrics', metricsRouter);
 app.use('/api/community', communityRouter);
 
 app.use(express.static(path.join(__dirname, 'public')));

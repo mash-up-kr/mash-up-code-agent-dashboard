@@ -43,9 +43,26 @@ async function initDB() {
     "ALTER TABLE members ADD COLUMN name VARCHAR(50) NOT NULL DEFAULT ''",
     "ALTER TABLE members ADD UNIQUE (username)",
     "ALTER TABLE members DROP COLUMN nickname",
+    "ALTER TABLE members ADD COLUMN hook_token VARCHAR(64) UNIQUE",
   ]) {
     try { await pool.execute(sql); } catch (_) {}
   }
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS member_events (
+      id           INT          AUTO_INCREMENT PRIMARY KEY,
+      member_id    INT          NOT NULL,
+      session_id   VARCHAR(100),
+      hook_event   VARCHAR(50),
+      tool_name    VARCHAR(50),
+      cwd          VARCHAR(500),
+      project_name VARCHAR(200),
+      created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_member_date    (member_id, created_at),
+      INDEX idx_member_project (member_id, project_name, created_at),
+      FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+    )
+  `);
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS group_members (
