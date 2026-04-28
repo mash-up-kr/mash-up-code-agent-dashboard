@@ -9,7 +9,7 @@ const session        = require('express-session');
 const { initDB }     = require('./db');
 const communityRouter = require('./routes/community');
 const authRouter      = require('./routes/auth');
-const { router: usageRouter, init: initUsage, updateRateLimits } = require('./routes/usage');
+const { router: usageRouter, init: initUsage, updateRateLimits, setBroadcast: setUsageBroadcast, getUsageState } = require('./routes/usage');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -79,6 +79,7 @@ function broadcast(eventName, data) {
     try { res.write(msg); } catch (_) { clients.delete(res); }
   }
 }
+setUsageBroadcast(broadcast);
 
 function addEvent(entry) {
   events.push(entry);
@@ -660,6 +661,7 @@ app.get('/api/stream', (req, res) => {
   });
   res.write('event: connected\ndata: {}\n\n');
   res.write(`event: init\ndata: ${JSON.stringify({ sessions: [...sessions.values()], events })}\n\n`);
+  res.write(`event: usage_update\ndata: ${JSON.stringify(getUsageState())}\n\n`);
   clients.add(res);
   req.on('close', () => clients.delete(res));
 });

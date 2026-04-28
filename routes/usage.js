@@ -75,8 +75,10 @@ const usageState = {
   projects: {}, // { projectPath: { totalTokens, sessionCount, cacheEfficiency, lastActivity, sessions } }
 };
 
-// SSE clients
-const usageClients = new Set();
+// 메인 스트림 broadcast 함수 (server.js에서 주입)
+let _broadcast = null;
+function setBroadcast(fn) { _broadcast = fn; }
+function getUsageState() { return usageState; }
 
 // ── Helpers ─────────────────────────────────────
 function normalizeModel(raw) {
@@ -102,10 +104,7 @@ function safeResolve(p) {
 }
 
 function broadcastUsage() {
-  const payload = `event: usage_update\ndata: ${JSON.stringify(usageState)}\n\n`;
-  for (const res of usageClients) {
-    try { res.write(payload); } catch (_) { usageClients.delete(res); }
-  }
+  if (_broadcast) _broadcast('usage_update', usageState);
 }
 
 function touchUsageState(ts = new Date().toISOString()) {
@@ -446,17 +445,6 @@ const router = Router();
 
 router.get('/snapshot', (_req, res) => res.json(usageState));
 
-router.get('/stream', (req, res) => {
-  res.writeHead(200, {
-    'Content-Type':  'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection':    'keep-alive',
-  });
-  res.write('event: connected\ndata: {}\n\n');
-  res.write(`event: usage_update\ndata: ${JSON.stringify(usageState)}\n\n`);
-  usageClients.add(res);
-  req.on('close', () => usageClients.delete(res));
-});
 
 // ── Init ─────────────────────────────────────────
 async function init() {
@@ -466,4 +454,4 @@ async function init() {
   startPeriodicRescan();
 }
 
-module.exports = { router, init, updateRateLimits };
+module.exports = { router, init, updateRateLimits, setBroadcast, getUsageState };

@@ -112,7 +112,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // 대시보드 탭 렌더링
     if (btn.dataset.tab === 'dashboard') {
       loadUsageSnapshot();
-      connectUsageStream();
     }
   });
 });
@@ -487,6 +486,10 @@ function connect() {
   const es = new EventSource('/api/stream');
 
   es.addEventListener('connected', () => setConnected(true));
+
+  es.addEventListener('usage_update', (e) => {
+    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
+  });
 
   es.addEventListener('init', e => {
     const { sessions: s, events: ev } = JSON.parse(e.data);
@@ -3413,20 +3416,6 @@ function renderUsageTab(data) {
 }
 
 /* ── Usage SSE + snapshot ────────────────────────── */
-let _usageStream = null;
-
-function connectUsageStream() {
-  if (_usageStream) _usageStream.close();
-  _usageStream = new EventSource('/api/usage/stream');
-  _usageStream.addEventListener('usage_update', (e) => {
-    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
-  });
-  _usageStream.addEventListener('error', () => {
-    setTimeout(() => {
-      fetch('/api/usage/snapshot').then(r => r.json()).then(renderUsageTab).catch(() => {});
-    }, 2000);
-  });
-}
 
 function loadUsageSnapshot() {
   fetch('/api/usage/snapshot')
