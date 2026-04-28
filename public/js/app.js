@@ -921,10 +921,12 @@ function renderProjectPanel(projects) {
     const lastLabel = activeSessions.length > 0 ? '' : formatLastActivity(proj.lastActivityTs);
 
     // ── Average session length ──
-    const completedSessions = (proj.sessions || []).filter(s => s.endedAt && s.startedAt);
+    const completedSessions = (proj.sessions || [])
+      .map(s => ({ s, end: s.effectiveEndedAt || s.endedAt }))
+      .filter(({ s, end }) => end && s.startedAt && end > s.startedAt);
     let avgSessionLen = 0;
     if (completedSessions.length > 0) {
-      const totalLen = completedSessions.reduce((sum, s) => sum + (s.endedAt - s.startedAt), 0);
+      const totalLen = completedSessions.reduce((sum, { s, end }) => sum + (end - s.startedAt), 0);
       avgSessionLen = totalLen / completedSessions.length;
     }
 
@@ -934,7 +936,8 @@ function renderProjectPanel(projects) {
     let todayDuration = 0;
     for (const s of (proj.sessions || [])) {
       if ((s.startedAt || 0) >= todayTs) {
-        todayDuration += s.endedAt ? (s.endedAt - s.startedAt) : (s.status !== 'ended' ? Date.now() - s.startedAt : 0);
+        const end = s.effectiveEndedAt || s.endedAt;
+        if (end && end > s.startedAt) todayDuration += (end - s.startedAt);
       }
     }
 
@@ -1021,7 +1024,8 @@ function renderProjectPanel(projects) {
 
     // ── Recent sessions ──
     const sessionRows = (proj.sessions || []).slice(0, 5).map(s => {
-      const dur = s.endedAt && s.startedAt ? formatDuration(s.endedAt - s.startedAt) : (s.status !== 'ended' ? 'active' : '-');
+      const end = s.effectiveEndedAt || s.endedAt;
+      const dur = end && s.startedAt ? formatDuration(end - s.startedAt) : (s.status !== 'ended' ? 'active' : '-');
       const statusDot = s.status === 'ended' ? 'bg-slate-500' : 'bg-emerald-500 animate-pulse';
       return `
         <div class="flex items-center gap-2 text-[10px] py-0.5">

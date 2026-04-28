@@ -124,6 +124,7 @@ function saveSession(pid) {
     name: sess.name,
     startedAt: sess.startedAt,
     endedAt: sess.endedAt || null,
+    lastActivityAt: sess.lastActivityAt || null,
     status: sess.status,
     toolCounts: stats.toolCounts,
     modifiedFiles: stats.modifiedFiles,
@@ -280,6 +281,30 @@ function loadAllSavedSessions() {
   return results;
 }
 
+// 서버 재시작 시 endedAt 없이 남아있는 고아 세션을 정리한다.
+// 마지막 활동(lastActivityAt)이 INACTIVE_TIMEOUT_MS 이전이면 그 시점에 종료된 것으로 마감한다.
+// lastActivityAt이 없는 옛 데이터는 startedAt으로 폴백해 0길이로 봉합한다.
+function sweepStaleSessions() {
+  const now = Date.now();
+  let closed = 0;
+  try {
+    const files = fs.readdirSync(DATA_DIR).filter(f => f.startsWith('session_') && f.endsWith('.json'));
+    for (const f of files) {
+      const fp = path.join(DATA_DIR, f);
+      let rec;
+      try { rec = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (_) { continue; }
+      if (rec.status === 'ended' && rec.endedAt) continue;
+      const last = rec.lastActivityAt || rec.startedAt || 0;
+      if (!last) continue;
+      if (now - last <= INACTIVE_TIMEOUT_MS) continue;
+      rec.status = 'ended';
+      rec.endedAt = last;
+      try { fs.writeFileSync(fp, JSON.stringify(rec, null, 2)); closed++; } catch (_) { /* ignore */ }
+    }
+  } catch (_) { /* data dir missing */ }
+  if (closed > 0) console.log(`[sweep] 고아 세션 ${closed}건을 마감 처리했어요`);
+}
+
 // ── Project aggregation ──────────────────────────
 
 function aggregateProjects() {
@@ -305,11 +330,33 @@ function aggregateProjects() {
       };
     }
     const proj = byProject[cwd];
+
+    // 세션의 실제 활성 종료 시각을 결정한다.
+    // - status가 ended라면 endedAt을 그대로 사용.
+    // - 아직 살아있으면 sessions 맵의 in-memory 정보(가장 신선함)를 우선,
+    //   없으면 디스크의 lastActivityAt이 INACTIVE_TIMEOUT_MS 이내일 때만 Date.now()로 인정.
+    //   그 외에는 lastActivityAt 시점에 멈춘 것으로 간주해 부풀림을 막는다.
+    const live = sessions.get(s.pid);
+    const liveLast = live ? live.lastActivityAt : null;
+    const diskLast = s.lastActivityAt || null;
+    const now = Date.now();
+    let effectiveEnd = null;
+    if (s.endedAt) {
+      effectiveEnd = s.endedAt;
+    } else if (liveLast && now - liveLast <= INACTIVE_TIMEOUT_MS) {
+      effectiveEnd = now;
+    } else if (diskLast && now - diskLast <= INACTIVE_TIMEOUT_MS) {
+      effectiveEnd = now;
+    } else {
+      effectiveEnd = diskLast || s.startedAt || null;
+    }
+
     proj.sessions.push({
       pid: s.pid,
       name: s.name,
       startedAt: s.startedAt,
       endedAt: s.endedAt,
+      effectiveEndedAt: effectiveEnd,
       status: s.status,
       eventCount: s.eventCount || 0,
       thinkingDuration: s.thinkingDuration || 0,
@@ -318,13 +365,11 @@ function aggregateProjects() {
     proj.totalEvents += (s.eventCount || 0);
     proj.totalThinkingDuration += (s.thinkingDuration || 0);
 
-    const lastTs = s.endedAt || s.startedAt || 0;
+    const lastTs = s.endedAt || diskLast || s.startedAt || 0;
     if (lastTs > proj.lastActivityTs) proj.lastActivityTs = lastTs;
 
-    if (s.startedAt && s.endedAt) {
-      proj.totalDuration += (s.endedAt - s.startedAt);
-    } else if (s.startedAt && s.status !== 'ended') {
-      proj.totalDuration += (Date.now() - s.startedAt);
+    if (s.startedAt && effectiveEnd && effectiveEnd > s.startedAt) {
+      proj.totalDuration += (effectiveEnd - s.startedAt);
     }
 
     for (const [tool, count] of Object.entries(s.toolCounts || {})) {
@@ -821,6 +866,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 initDB()
   .then(() => initUsage())
   .then(() => {
+    sweepStaleSessions();
     app.listen(PORT, () => {
       console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
     });
