@@ -2702,7 +2702,62 @@ async function refreshGroupList() {
   }
   hideCommunityAuthRequired();
   renderGroupCards(groups);
+  applyUnreadBadges();
 }
+
+// Decorate each [data-group-id] card with a KakaoTalk-style red badge
+// showing the unread count, driven by GET /api/chat/unread.
+async function applyUnreadBadges() {
+  let unread;
+  try {
+    const res = await fetch('/api/chat/unread', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const data = await res.json();
+    unread = Array.isArray(data.unread) ? data.unread : [];
+  } catch (_) { return; }
+
+  const counts = new Map(unread.map(u => [Number(u.groupId), Number(u.unreadCount) || 0]));
+  document.querySelectorAll('[data-group-id]').forEach(card => {
+    const gid = Number(card.dataset.groupId);
+    const count = counts.get(gid) || 0;
+    let badge = card.querySelector(':scope > .unread-badge');
+    if (count > 0) {
+      if (!badge) {
+        if (getComputedStyle(card).position === 'static') {
+          card.style.position = 'relative';
+        }
+        badge = document.createElement('span');
+        badge.className = 'unread-badge absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-lg shadow-red-500/30 z-10';
+        card.appendChild(badge);
+      }
+      badge.textContent = count > 99 ? '99+' : String(count);
+    } else if (badge) {
+      badge.remove();
+    }
+  });
+}
+
+// Refresh badges whenever chat.js says local state changed (read marker
+// updated after viewing the active group, or login/active-group switch).
+window.addEventListener('chat:unread-changed', applyUnreadBadges);
+
+// Lightweight polling: every 2s, but only when the user is actually
+// looking at the community group list. Stops automatically while the
+// browser tab is hidden, while the user is on another app tab, or while
+// they're inside a chat room. No SSE on background groups.
+const UNREAD_POLL_INTERVAL_MS = 2000;
+
+function isCommunityGroupListVisible() {
+  if (document.visibilityState && document.visibilityState !== 'visible') return false;
+  const view = document.getElementById('view-community');
+  if (!view || view.classList.contains('hidden')) return false;
+  const groups = document.getElementById('community-groups');
+  return !!(groups && !groups.classList.contains('hidden'));
+}
+
+setInterval(() => {
+  if (isCommunityGroupListVisible()) applyUnreadBadges();
+}, UNREAD_POLL_INTERVAL_MS);
 
 function showCommunityAuthRequired() {
   const community = document.getElementById('view-community');
