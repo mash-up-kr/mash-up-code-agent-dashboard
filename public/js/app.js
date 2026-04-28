@@ -2696,8 +2696,49 @@ function renderGroupCards(groups) {
 
 async function refreshGroupList() {
   const groups = await fetchMyGroups();
-  if (groups === null) { openAuthModal('login'); return; }
+  if (groups === null) {
+    showCommunityAuthRequired();
+    return;
+  }
+  hideCommunityAuthRequired();
   renderGroupCards(groups);
+}
+
+function showCommunityAuthRequired() {
+  const community = document.getElementById('view-community');
+  if (!community) return;
+
+  // Hide the normal sub-views while the auth-required empty state is up.
+  document.getElementById('community-groups')?.classList.add('hidden');
+  document.getElementById('community-chat')?.classList.add('hidden');
+
+  let empty = document.getElementById('community-auth-required');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'community-auth-required';
+    empty.className = 'absolute inset-0 flex flex-col items-center justify-center bg-[#0d0f18] dot-grid';
+    empty.innerHTML = `
+      <div class="w-24 h-24 mb-6 border border-dashed border-[#6046ff]/40 rounded-xl flex items-center justify-center">
+        <span class="material-symbols-outlined text-4xl text-[#6046ff]">lock</span>
+      </div>
+      <p class="text-sm font-headline tracking-widest uppercase text-slate-300 mb-2">Login Required</p>
+      <p class="text-slate-500 text-sm mb-6">로그인 후 사용할 수 있습니다.</p>
+      <button id="btn-community-auth-login"
+              class="px-6 py-2.5 bg-[#6046ff] hover:bg-[#725bff] text-white text-sm font-bold rounded-lg transition-colors cursor-pointer">
+        로그인 / 회원가입
+      </button>
+    `;
+    community.appendChild(empty);
+    empty.querySelector('#btn-community-auth-login')?.addEventListener('click', () => {
+      openAuthModal('login');
+    });
+  }
+  empty.classList.remove('hidden');
+}
+
+function hideCommunityAuthRequired() {
+  document.getElementById('community-auth-required')?.classList.add('hidden');
+  document.getElementById('community-groups')?.classList.remove('hidden');
 }
 
 // 커뮤니티 탭 클릭 시 목록 갱신
