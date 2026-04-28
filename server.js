@@ -5,11 +5,30 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const session        = require('express-session');
-const { initDB }     = require('./db');
-const communityRouter = require('./routes/community');
-const authRouter      = require('./routes/auth');
-const { router: usageRouter, init: initUsage, updateRateLimits, setBroadcast: setUsageBroadcast, getUsageState } = require('./routes/usage');
+const {
+  router: usageRouter,
+  init: initUsage,
+  updateRateLimits,
+  setBroadcast: setUsageBroadcast,
+  getUsageState,
+} = require('./routes/usage');
+
+// 커뮤니티/인증은 선택 의존성 — 미설치 시에도 JSONL/세션 시각화는 동작한다.
+let session = null;
+let initDB = null;
+let communityRouter = null;
+let authRouter = null;
+let communityModulesLoaded = false;
+try {
+  session         = require('express-session');
+  ({ initDB }     = require('./db'));
+  communityRouter = require('./routes/community');
+  authRouter      = require('./routes/auth');
+  communityModulesLoaded = true;
+} catch (err) {
+  console.warn(`[community] 의존성 미설치 — 커뮤니티/인증 모듈 비활성화: ${err.message}`);
+  console.warn('  npm run install:community 로 활성화할 수 있어요.');
+}
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -689,12 +708,14 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10mb' }));
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'mashup-dashboard-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 },
-}));
+if (session) {
+  app.use(session({
+    secret: process.env.SESSION_SECRET || 'mashup-dashboard-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 },
+  }));
+}
 
 // ── Routes ───────────────────────────────────────
 
@@ -857,23 +878,49 @@ app.get('/api/events', (req, res) => {
   res.json(events.slice(-100));
 });
 
-app.use('/api/auth', authRouter);
-app.use('/api/community', communityRouter);
+// 커뮤니티 모듈이 로드된 경우에만 라우트를 마운트하고, DB 미연결 시 503으로 가드한다.
+// (모듈 미로드면 라우트 자체가 없으므로 404)
+const dbState = { ready: false };
+const requireDb = (_req, res, next) => {
+  if (!dbState.ready) {
+    return res.status(503).json({
+      error: 'community_disabled',
+      message: 'MySQL이 연결되지 않아 커뮤니티/인증 기능이 비활성 상태예요.',
+    });
+  }
+  next();
+};
+
+if (communityModulesLoaded) {
+  app.use('/api/auth', requireDb, authRouter);
+  app.use('/api/community', requireDb, communityRouter);
+}
 app.use('/api/usage', usageRouter);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────
 
-initDB()
-  .then(() => initUsage())
-  .then(() => {
-    sweepStaleSessions();
-    app.listen(PORT, () => {
-      console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
-    });
-  })
-  .catch(err => {
-    console.error('초기화 실패:', err.message);
+(async () => {
+  const dbInit = initDB
+    ? initDB().then(() => { dbState.ready = true; })
+        .catch(err => console.warn(`[db] MySQL 초기화 실패 — 커뮤니티/인증 기능 비활성화: ${err.message}`))
+    : Promise.resolve();
+
+  const usageInit = initUsage().catch(err => {
+    console.error('[usage] 초기화 실패:', err.message);
     process.exit(1);
   });
+
+  await Promise.all([dbInit, usageInit]);
+
+  sweepStaleSessions();
+  app.listen(PORT, () => {
+    console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
+    if (!communityModulesLoaded) {
+      console.log('  (로컬 모드 · 커뮤니티 의존성 미설치)');
+    } else if (!dbState.ready) {
+      console.log('  (커뮤니티 비활성 · MySQL 미연결)');
+    }
+  });
+})();
