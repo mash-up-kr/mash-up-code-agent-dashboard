@@ -1,27 +1,22 @@
 -- Chat feature schema.
 --
--- Apply with:
---   mysql -u root -p < sql/chat_schema.sql
+-- Depends on the `groups` and `members` tables created by db.js > initDB.
+-- The chat router (routes/chat.js) also runs the equivalent CREATE TABLE
+-- IF NOT EXISTS at startup, so this file is mainly for reference and for
+-- bootstrapping the database manually.
 --
--- Override connection via environment variables consumed by chat.js:
---   CHAT_DB_HOST   (default: localhost)
---   CHAT_DB_PORT   (default: 3306)
---   CHAT_DB_USER   (default: root)
---   CHAT_DB_PASS   (default: empty)
---   CHAT_DB_NAME   (default: chat_db)
-
-CREATE DATABASE IF NOT EXISTS chat_db
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE chat_db;
+-- Apply with:
+--   mysql -u root -p mashup_claude < sql/chat_schema.sql
 
 CREATE TABLE IF NOT EXISTS messages (
-  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-  user_name  VARCHAR(64) NOT NULL,
-  content    TEXT NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_created (created_at)
+  id         BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  group_id   INT          NOT NULL,
+  member_id  INT          NOT NULL,
+  content    TEXT         NOT NULL,
+  created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_group_id (group_id, id),
+  FOREIGN KEY (group_id)  REFERENCES `groups`(id) ON DELETE CASCADE,
+  FOREIGN KEY (member_id) REFERENCES members(id)  ON DELETE CASCADE
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci;
