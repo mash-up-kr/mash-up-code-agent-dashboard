@@ -24,7 +24,9 @@
   let me = null;                            // { memberId, name, username }
   let activeGroupId = null;
   let pickerVisible = false;                // overlay group picker over the active chat
-  const groupConnections = new Map();       // groupId -> Connection
+  const groupConnections = new Map();       // groupId -> Connection (only the active group has one)
+  let lastSeenMessageId = 0;                // highest msg.id rendered in the active group
+  let markReadTimer = null;
 
   // ─── Auth ──────────────────────────────────────────────────
 
@@ -46,16 +48,13 @@
       me = next;
 
       if (isLoggedIn) {
-        if (!wasLoggedIn) {
-          // Just authenticated — open streams for every group we belong to.
-          await bootstrapAllGroups();
-        }
         if (activeGroupId) {
           setInputsDisabled(false, '메시지를 입력하세요...');
         } else {
           setInputsDisabled(true, '그룹에 입장하면 채팅이 시작됩니다.');
           renderIdleState();
         }
+        notifyUnreadChanged();
       } else {
         if (wasLoggedIn) {
           closeAllConnections();
@@ -253,7 +252,12 @@
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       conn.messages = msgs.slice();
       conn.renderedIds = new Set(msgs.map(m => m.id).filter(x => x != null));
-      if (id === activeGroupId && !pickerVisible) renderActive();
+      if (id === activeGroupId) {
+        const maxId = msgs.reduce((acc, m) => Math.max(acc, Number(m.id) || 0), 0);
+        if (maxId > lastSeenMessageId) lastSeenMessageId = maxId;
+        if (!pickerVisible) renderActive();
+        scheduleMarkRead();
+      }
     });
 
     es.addEventListener('chat', (e) => {
@@ -261,7 +265,11 @@
       if (m.id != null && conn.renderedIds.has(m.id)) return;
       if (m.id != null) conn.renderedIds.add(m.id);
       pushBufferEntry(conn, m);
-      if (id === activeGroupId && !pickerVisible) appendMessageUI(m);
+      if (id === activeGroupId) {
+        if (Number(m.id) > lastSeenMessageId) lastSeenMessageId = Number(m.id);
+        if (!pickerVisible) appendMessageUI(m);
+        scheduleMarkRead();
+      }
     });
 
     es.addEventListener('member_change', (e) => {
@@ -320,15 +328,34 @@
     groupConnections.clear();
   }
 
-  async function bootstrapAllGroups() {
-    if (!me) return;
+  // ─── Read tracking & unread badge bridge ───────────────────
+
+  function scheduleMarkRead() {
+    if (!me || !activeGroupId || !lastSeenMessageId) return;
+    if (markReadTimer) clearTimeout(markReadTimer);
+    markReadTimer = setTimeout(markActiveRead, 600);
+  }
+
+  async function markActiveRead() {
+    if (!me || !activeGroupId || !lastSeenMessageId) return;
+    const groupId   = activeGroupId;
+    const messageId = lastSeenMessageId;
     try {
-      const res = await fetch('/api/community/groups', { credentials: 'same-origin' });
-      if (!res.ok) return;
-      const groups = await res.json();
-      if (!Array.isArray(groups)) return;
-      for (const g of groups) ensureConnection(g.id);
-    } catch (_) { /* ignore */ }
+      await fetch(`/api/chat/groups/${groupId}/read`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId }),
+      });
+      notifyUnreadChanged();
+    } catch (_) { /* network errors are non-fatal */ }
+  }
+
+  // Let app.js (group-card renderer) refresh badges when our state changes.
+  function notifyUnreadChanged() {
+    try {
+      window.dispatchEvent(new CustomEvent('chat:unread-changed'));
+    } catch (_) { /* old browsers — ignore */ }
   }
 
   // ─── Active group selection ────────────────────────────────
@@ -337,10 +364,17 @@
     const id = Number(groupId);
     if (!id) return;
     pickerVisible = false;                // closing picker if open
-    ensureConnection(id);                 // open if not already
+    // Single-active-stream model: drop any other connection so the server
+    // doesn't have to hold an SSE per group per user.
+    for (const otherId of [...groupConnections.keys()]) {
+      if (otherId !== id) closeConnection(otherId);
+    }
+    ensureConnection(id);
     activeGroupId = id;
+    lastSeenMessageId = 0;
     setInputsDisabled(false, '메시지를 입력하세요...');
     renderActive();
+    notifyUnreadChanged();
   }
 
   function clearActiveGroup() {
