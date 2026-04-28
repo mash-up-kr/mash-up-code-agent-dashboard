@@ -28,13 +28,16 @@ case "$EVENT_TYPE" in
   Stop)              EVENT_TYPE="stop" ;;
   PreCompact)        EVENT_TYPE="pre_compact" ;;
   PostCompact)       EVENT_TYPE="post_compact" ;;
+  StatusLine)        EVENT_TYPE="statusline_update" ;;
 esac
 
-# Extract Claude session_id from hook stdin — use as stable unique session identifier
-SID=$(echo "$INPUT" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-SESSION_ID="${SID:-unknown}"
+# Extract Claude session_id from hook stdin — tolerate JSON spacing differences
+SID=$(printf '%s' "$INPUT" \
+  | grep -Eo '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+  | head -1 \
+  | sed -E 's/^"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"$/\1/')
 
-PAYLOAD="{\"event\":\"$EVENT_TYPE\",\"session\":{\"pid\":\"$SESSION_ID\",\"cwd\":\"$SESSION_CWD\",\"name\":\"$SESSION_NAME\",\"sid\":\"$SID\"},\"data\":$INPUT}"
+PAYLOAD="{\"event\":\"$EVENT_TYPE\",\"session\":{\"pid\":\"$SID\",\"cwd\":\"$SESSION_CWD\",\"name\":\"$SESSION_NAME\",\"sid\":\"$SID\"},\"data\":$INPUT}"
 
 if [ "$EVENT_TYPE" = "session_start" ]; then
   # Retry up to 5 times to handle server startup delay

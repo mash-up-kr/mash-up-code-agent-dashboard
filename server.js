@@ -7,9 +7,10 @@ const fs = require('fs');
 const path = require('path');
 const session        = require('express-session');
 const { initDB }     = require('./db');
-const communityRouter        = require('./routes/community');
 const authRouter             = require('./routes/auth');
 const { router: metricsRouter } = require('./routes/metrics');
+const communityRouter = require('./routes/community');
+const { router: usageRouter, init: initUsage, updateRateLimits } = require('./routes/usage');
 
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
@@ -411,6 +412,11 @@ function handleEvent(body) {
 
   const entry = { type, pid, cwd, name, sid, ts };
 
+  if (type === 'statusline_update' || data?.rate_limits) {
+    updateRateLimits(data?.rate_limits || {});
+    return;
+  }
+
   if (pid && !sessions.has(pid) && type !== 'session_end') {
     let savedStartedAt = null;
     try {
@@ -808,18 +814,20 @@ app.get('/api/events', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/metrics', metricsRouter);
 app.use('/api/community', communityRouter);
+app.use('/api/usage', usageRouter);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────
 
 initDB()
+  .then(() => initUsage())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`mash-up-code-agent-dashboard  →  http://localhost:${PORT}`);
     });
   })
   .catch(err => {
-    console.error('DB 초기화 실패:', err.message);
+    console.error('초기화 실패:', err.message);
     process.exit(1);
   });

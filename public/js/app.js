@@ -108,6 +108,12 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         chatToggleBtn.classList.add('hover:bg-[#1c1f2e]');
       }
     }
+
+    // 대시보드 탭 렌더링
+    if (btn.dataset.tab === 'dashboard') {
+      loadUsageSnapshot();
+      connectUsageStream();
+    }
   });
 });
 
@@ -3203,3 +3209,370 @@ document.getElementById('view-community')?.addEventListener('click', e => {
   }
   if (e.target.closest('#btn-group-back')) showCommunityGroups();
 });
+
+function formatTimeRemaining(ms) {
+  if (!Number.isFinite(ms)) return '리셋 정보 없음';
+  const totalSecs = Math.floor(ms / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  if (totalSecs <= 0) return '이제 다시 쓸 수 있어요! 🥳 메시지를 보내면 리셋됩니다.';
+  if (totalSecs < 60) return '곧 리셋';
+  
+  if (days > 0) return `${days}일 ${hours}시간 후 리셋`;
+  if (hours > 0) return `${hours}시간 ${mins}분 후 리셋`;
+  return `${mins}분 후 리셋`;
+}
+
+function getBarColor(percent) {
+  if (percent >= 90) return 'bg-[#ef4444]'; // red
+  if (percent >= 70) return 'bg-[#f97316]'; // orange
+  return 'bg-[#6046ff]'; // purple
+}
+
+/* ── Usage tab: model color map ─────────────────── */
+const MODEL_COLORS = [
+  { prefix: 'Opus',   color: '#a78bfa' },
+  { prefix: 'Sonnet', color: '#6046ff' },
+  { prefix: 'Haiku',  color: '#312e81' },
+];
+function modelColor(name) {
+  const m = MODEL_COLORS.find(c => name.startsWith(c.prefix));
+  return m ? m.color : '#6b7280';
+}
+
+let usageLastUpdatedAt = 0;
+let usageBadgeTimer = null;
+
+function toLocalDateKey(input) {
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatUsageUpdatedAgo(ts) {
+  if (!Number.isFinite(ts)) return '갱신 정보 없음';
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 10) return '방금 전 갱신';
+  if (diff < 60) return `${diff}초 전 갱신`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}분 전 갱신`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전 갱신`;
+  return `${Math.floor(diff / 86400)}일 전 갱신`;
+}
+
+function updateUsageRefreshBadges() {
+  const label = formatUsageUpdatedAgo(usageLastUpdatedAt);
+  const html = `<span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>${esc(label)}`;
+  const weeklyBadge = document.getElementById('usage-weekly-updated-at');
+  const chartBadge = document.getElementById('usage-chart-updated-at');
+  const projectBadge = document.getElementById('usage-project-updated-at');
+  if (weeklyBadge) weeklyBadge.innerHTML = html;
+  if (chartBadge) chartBadge.innerHTML = html;
+  if (projectBadge) projectBadge.innerHTML = html;
+}
+
+function positionUsageBadgeTooltip(tooltip, badge) {
+  const rect = badge.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.max(8, rect.left - tooltip.offsetWidth - gap);
+  const top = Math.max(8, rect.top - tooltip.offsetHeight - gap);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+/* ── Build last-7-days rows from API daily state ── */
+function buildDailyRows(daily) {
+  const rows = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = toLocalDateKey(d);
+    const mm  = String(d.getMonth() + 1).padStart(2, '0');
+    const dd  = String(d.getDate()).padStart(2, '0');
+    const dayLabel = ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getDay()];
+    rows.push({ key, label: `${mm}/${dd}`, dayLabel, models: daily[key] || {} });
+  }
+  return rows;
+}
+
+function normalizePathForCompare(p) {
+  return String(p || '')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+}
+
+function getActiveUsageSessions(projectPath) {
+  const normalizedProjectPath = normalizePathForCompare(projectPath);
+  return [...sessions.values()].filter((sess) => {
+    if (!sess || sess.status === 'ended') return false;
+    return normalizePathForCompare(sess.cwd) === normalizedProjectPath;
+  });
+}
+
+function getLiveUsageProjectActivity(projectPath) {
+  const activeSessions = getActiveUsageSessions(projectPath);
+  if (activeSessions.length === 0) return null;
+  return Math.max(...activeSessions.map(sess => sess.lastActivityAt || sess.startedAt || 0));
+}
+
+function getLiveUsageSessionActivity(projectPath, usageSession) {
+  const activeSessions = getActiveUsageSessions(projectPath);
+  if (activeSessions.length === 0) return null;
+  const usageSessionId = usageSession?.sessionId || null;
+  const matchedById = usageSessionId
+    ? activeSessions.filter(sess => sess.sid === usageSessionId || sess.pid === usageSessionId)
+    : [];
+  if (matchedById.length > 0) {
+    return Math.max(...matchedById.map(sess => sess.lastActivityAt || sess.startedAt || 0));
+  }
+  const sessionName = usageSession?.sessionName || '';
+  const matched = activeSessions.filter(sess => (sess.name || '').trim() === sessionName.trim());
+  const source = matched.length > 0 ? matched : [];
+  if (source.length === 0) return null;
+  return Math.max(...source.map(sess => sess.lastActivityAt || sess.startedAt || 0));
+}
+
+function formatUsageLastActivity(isoOrTs) {
+  if (!isoOrTs) return '—';
+  const ts = typeof isoOrTs === 'number' ? isoOrTs : new Date(isoOrTs).getTime();
+  if (!Number.isFinite(ts)) return '—';
+  return formatTimeAgo(ts);
+}
+
+function getResetMs(resetsAt) {
+  if (!resetsAt) return NaN;
+  return new Date(resetsAt).getTime() - Date.now();
+}
+
+function renderUsageTab(data) {
+  usageLastUpdatedAt = data?.updatedAt ? new Date(data.updatedAt).getTime() : NaN;
+  updateUsageRefreshBadges();
+  if (!usageBadgeTimer) {
+    usageBadgeTimer = setInterval(updateUsageRefreshBadges, 10000);
+  }
+
+  /* ── 플랜 소진율 ──────────────────────────────── */
+  const p5h = data?.rateLimits?.fiveHour || {};
+  const p7d = data?.rateLimits?.sevenDay || {};
+  const plan5hBar     = document.getElementById('plan-5h-bar');
+  const plan5hPercent = document.getElementById('plan-5h-percent');
+  const plan5hReset   = document.getElementById('plan-5h-reset');
+  const plan7dBar     = document.getElementById('plan-7d-bar');
+  const plan7dPercent = document.getElementById('plan-7d-percent');
+  const plan7dReset   = document.getElementById('plan-7d-reset');
+  const p5hUsedPercent = Number.isFinite(p5h.usedPercentage) ? p5h.usedPercentage : 0;
+  const p7dUsedPercent = Number.isFinite(p7d.usedPercentage) ? p7d.usedPercentage : 0;
+  plan5hPercent.textContent = `${Math.round(p5hUsedPercent)}%`;
+  plan5hBar.style.width = `${Math.max(0, Math.min(100, p5hUsedPercent))}%`;
+  plan5hBar.className = `h-full rounded-full ${getBarColor(p5hUsedPercent)}`;
+  plan5hReset.textContent = formatTimeRemaining(getResetMs(p5h.resetsAt));
+  plan7dPercent.textContent = `${Math.round(p7dUsedPercent)}%`;
+  plan7dBar.style.width = `${Math.max(0, Math.min(100, p7dUsedPercent))}%`;
+  plan7dBar.className = `h-full rounded-full ${getBarColor(p7dUsedPercent)}`;
+  plan7dReset.textContent = formatTimeRemaining(getResetMs(p7d.resetsAt));
+
+  /* ── 일별 스택 막대 ────────────────────────────── */
+  const daily          = data?.daily || {};
+  const dailyRows      = buildDailyRows(daily);
+  const allModelNames  = [...new Set(dailyRows.flatMap(r => Object.keys(r.models)))];
+  const maxTok = Math.max(1, ...dailyRows.map(r => Object.values(r.models).reduce((s, v) => s + v, 0)));
+
+  const chartContainer = document.getElementById('chart-stacked-bars');
+  chartContainer.innerHTML = dailyRows.map(row => {
+    const total   = Object.values(row.models).reduce((s, v) => s + v, 0);
+    const bars = allModelNames.map(model => {
+      const tokens = row.models[model] || 0;
+      if (!tokens) return '';
+      const heightPct = (tokens / maxTok) * 100;
+      const color = modelColor(model);
+      return `<div class="w-full cursor-pointer chart-bar"
+        style="height: ${heightPct}%; background: ${color};"
+        data-model="${esc(model)}" data-tokens="${tokens}" data-color="${color}"></div>`;
+    }).join('');
+    return `
+      <div class="flex-1 flex flex-col items-center">
+        <div class="w-2/5 h-48 mx-auto flex flex-col-reverse gap-0.5 mb-2">
+          ${total > 0 ? bars : ''}
+        </div>
+        <span class="text-[10px] font-mono text-slate-500">${row.label}</span>
+        <span class="text-[8px] text-slate-600">${row.dayLabel}</span>
+      </div>`;
+  }).join('');
+
+  /* ── 범례 동적 업데이트 ───────────────────────── */
+  const legendEl = document.getElementById('chart-legend');
+  if (legendEl && allModelNames.length > 0) {
+    legendEl.innerHTML = allModelNames.map(m =>
+      `<div class="flex items-center gap-2">
+        <div class="w-3 h-3 rounded-sm" style="background:${modelColor(m)}"></div>
+        <span class="text-xs text-slate-400">${esc(m)}</span>
+      </div>`
+    ).join('');
+  }
+
+  /* ── 프로젝트 테이블 ───────────────────────────── */
+  const rawProjects = data?.projects || {};
+  document.getElementById('stat-weekly-sessions').textContent = data?.weeklySessionCount ?? 0;
+  const projectEntries = Object.entries(rawProjects)
+    .sort((a, b) => (b[1].lastActivity || '') > (a[1].lastActivity || '') ? 1 : -1);
+
+  const tableBody = document.getElementById('project-table-body');
+
+  const openProjects = new Set();
+  tableBody.querySelectorAll('.project-row').forEach(row => {
+    const firstDetail = row.nextElementSibling;
+    if (firstDetail && !firstDetail.classList.contains('hidden')) {
+      openProjects.add(row.dataset.projPath);
+    }
+  });
+
+  if (projectEntries.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-600 text-xs">데이터 없음 — JSONL 파싱 중이거나 사용 기록이 없습니다</td></tr>`;
+  } else {
+    tableBody.innerHTML = projectEntries.flatMap(([projPath, proj], idx) => {
+      const projName   = projPath.split('/').filter(Boolean).pop() || projPath;
+      const cacheEff   = proj.cacheEfficiency != null ? Math.round(proj.cacheEfficiency * 100) : null;
+      const cacheLabel = cacheEff != null ? `${cacheEff}%` : '—';
+      const cacheClass = cacheEff != null && cacheEff >= 70 ? 'text-emerald-400' : 'text-slate-400';
+      const liveProjectActivity = getLiveUsageProjectActivity(projPath);
+      const hasLiveProjectActivity = Number.isFinite(liveProjectActivity) && liveProjectActivity > 0;
+      const sessArr    = Object.values(proj.sessions || {})
+        .sort((a, b) => (b.date || '') > (a.date || '') ? 1 : -1);
+
+      const headerRow = `
+        <tr class="hover:bg-[#1c1f2e] cursor-pointer project-row" data-session-count="${sessArr.length + 1}" data-proj-path="${esc(projPath)}">
+          <td class="px-6 py-3 text-slate-300 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[14px] transition-transform accordion-arrow">chevron_right</span>
+            ${esc(projName)}
+          </td>
+          <td class="px-6 py-3 text-right text-slate-300 font-mono">${((proj.totalTokens || 0) / 1000).toFixed(1)}K</td>
+          <td class="px-6 py-3 text-right text-slate-300">${proj.sessionCount || 0}</td>
+          <td class="px-6 py-3 text-right"><span class="font-mono ${cacheClass}">${cacheLabel}</span></td>
+          <td class="px-6 py-3 text-right text-slate-500 text-xs">${hasLiveProjectActivity ? '실시간' : formatUsageLastActivity(proj.lastActivity)}</td>
+        </tr>`;
+
+      const subheaderRow = `
+        <tr class="session-detail hidden border-t border-[#252838]/30">
+          <td class="px-6 py-1.5 pl-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">세션</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">사용 토큰</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">최근 사용 모델</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">캐시 효율</td>
+          <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">마지막 활동</td>
+        </tr>`;
+
+      const sessionRows = sessArr.map(sess => {
+        const sessCacheEff = sess.cacheEfficiency != null ? Math.round(sess.cacheEfficiency * 100) : null;
+        const liveSessionActivity = getLiveUsageSessionActivity(projPath, sess);
+        const hasLiveSessionActivity = Number.isFinite(liveSessionActivity) && liveSessionActivity > 0;
+        const lastAct = hasLiveSessionActivity ? '실시간' : formatUsageLastActivity(sess.lastActivity);
+        const sessionLabel = sess.sessionName || sess.name || '—';
+        return `
+          <tr class="session-detail hidden bg-[#0d0e15]">
+            <td class="px-6 py-2 pl-12 text-slate-400 text-xs font-mono truncate max-w-0">${esc(sessionLabel)}</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${((sess.tokens || 0) / 1000).toFixed(1)}K</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs whitespace-nowrap">${esc(sess.model || '—')}</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${sessCacheEff != null ? sessCacheEff + '%' : '—'}</td>
+            <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono whitespace-nowrap">${lastAct}</td>
+          </tr>`;
+      }).join('');
+
+      return headerRow + subheaderRow + sessionRows;
+    }).join('');
+  }
+
+  /* ── 아코디언 상태 복원 ──────────────────────────── */
+  if (openProjects.size > 0) {
+    tableBody.querySelectorAll('.project-row').forEach(row => {
+      if (!openProjects.has(row.dataset.projPath)) return;
+      const count = parseInt(row.dataset.sessionCount) || 0;
+      let cur = row.nextElementSibling;
+      let n = 0;
+      while (cur && cur.classList.contains('session-detail') && n < count) {
+        cur.classList.remove('hidden');
+        n++;
+        cur = cur.nextElementSibling;
+      }
+      const arrow = row.querySelector('.accordion-arrow');
+      if (arrow) arrow.style.transform = 'rotate(90deg)';
+    });
+  }
+
+  /* ── 프로젝트 행 accordion ─────────────────────── */
+  document.querySelectorAll('.project-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const count = parseInt(row.dataset.sessionCount) || 0;
+      let cur = row.nextElementSibling;
+      let n = 0;
+      let hadHidden = false;
+      while (cur && cur.classList.contains('session-detail') && n < count) {
+        if (cur.classList.contains('hidden')) hadHidden = true;
+        cur.classList.toggle('hidden');
+        n++;
+        cur = cur.nextElementSibling;
+      }
+      const arrow = row.querySelector('.accordion-arrow');
+      if (arrow) arrow.style.transform = hadHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+    });
+  });
+
+  /* ── 차트 툴팁 ─────────────────────────────────── */
+  let tooltip = document.getElementById('chart-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'chart-tooltip';
+    tooltip.className = 'fixed hidden text-[11px] leading-snug text-[#f1f5f9] z-50 pointer-events-none max-w-[320px] whitespace-normal';
+    tooltip.style.cssText = 'background:#1c1f2e;border:1px solid #252838;border-radius:6px;padding:6px 10px;';
+    document.body.appendChild(tooltip);
+  }
+  document.querySelectorAll('.chart-bar').forEach(bar => {
+    bar.addEventListener('mouseenter', () => {
+      const color  = bar.dataset.color;
+      const model  = bar.dataset.model;
+      const tokens = parseInt(bar.dataset.tokens);
+      tooltip.innerHTML = `<span style="color:${color};margin-right:6px;font-size:10px;">●</span>${esc(model)}: ${tokens.toLocaleString()}`;
+      tooltip.classList.remove('hidden');
+    });
+    bar.addEventListener('mousemove', (e) => {
+      tooltip.style.left = (e.clientX + 12) + 'px';
+      tooltip.style.top  = (e.clientY - 12) + 'px';
+    });
+    bar.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
+  });
+
+  document.querySelectorAll('.usage-badge-tooltip').forEach((badge) => {
+    if (badge.dataset.tooltipBound === 'true') return;
+    badge.dataset.tooltipBound = 'true';
+    badge.addEventListener('mouseenter', () => {
+      tooltip.innerHTML = esc(badge.dataset.tooltipContent || '');
+      tooltip.classList.remove('hidden');
+      positionUsageBadgeTooltip(tooltip, badge);
+    });
+    badge.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
+  });
+}
+
+/* ── Usage SSE + snapshot ────────────────────────── */
+let _usageStream = null;
+
+function connectUsageStream() {
+  if (_usageStream) _usageStream.close();
+  _usageStream = new EventSource('/api/usage/stream');
+  _usageStream.addEventListener('usage_update', (e) => {
+    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
+  });
+  _usageStream.addEventListener('error', () => {
+    setTimeout(() => {
+      fetch('/api/usage/snapshot').then(r => r.json()).then(renderUsageTab).catch(() => {});
+    }, 2000);
+  });
+}
+
+function loadUsageSnapshot() {
+  fetch('/api/usage/snapshot')
+    .then(r => r.json())
+    .then(renderUsageTab)
+    .catch(() => renderUsageTab(null));
+}
