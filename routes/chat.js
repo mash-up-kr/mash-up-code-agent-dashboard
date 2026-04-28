@@ -45,6 +45,18 @@ async function ensureSchema() {
         INDEX idx_group_id (group_id, id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    // Per-(member, group) bookmark of the last message the user saw. Used to
+    // compute KakaoTalk-style unread badges on the group list.
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS group_member_reads (
+        member_id            INT       NOT NULL,
+        group_id             INT       NOT NULL,
+        last_read_message_id BIGINT    DEFAULT 0,
+        updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (member_id, group_id),
+        INDEX idx_member (member_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
   })();
   // Don't cache failures — clear schemaReady so the next call can retry.
   schemaReady.catch(() => { schemaReady = null; });
@@ -217,6 +229,78 @@ router.get('/groups/:groupId/messages', requireAuth, requireGroupMembership, asy
   } catch (e) {
     console.error('[chat] history load failed:', e);
     res.status(500).json({ error: '메시지 내역을 불러오지 못했습니다.' });
+  }
+});
+
+// GET /api/chat/unread
+// Returns one row per group the user belongs to:
+//   { groupId, lastMessageId, lastReadId, unreadCount }
+// The frontend uses this to draw KakaoTalk-style badges on group cards.
+router.get('/unread', requireAuth, async (req, res) => {
+  await ensureSchema();
+  const memberId = req.session.memberId;
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        gm.group_id AS groupId,
+        COALESCE(latest.last_id, 0) AS lastMessageId,
+        COALESCE(r.last_read_message_id, 0) AS lastReadId,
+        COALESCE((
+          SELECT COUNT(*) FROM messages
+           WHERE group_id = gm.group_id
+             AND id > COALESCE(r.last_read_message_id, 0)
+        ), 0) AS unreadCount
+      FROM group_members gm
+      LEFT JOIN (
+        SELECT group_id, MAX(id) AS last_id
+          FROM messages
+         GROUP BY group_id
+      ) latest ON latest.group_id = gm.group_id
+      LEFT JOIN group_member_reads r
+        ON r.group_id = gm.group_id AND r.member_id = gm.member_id
+      WHERE gm.member_id = ?
+    `, [memberId]);
+    res.json({
+      unread: rows.map(r => ({
+        groupId:       Number(r.groupId),
+        lastMessageId: Number(r.lastMessageId),
+        lastReadId:    Number(r.lastReadId),
+        unreadCount:   Number(r.unreadCount),
+      })),
+    });
+  } catch (e) {
+    console.error('[chat] unread query failed:', e);
+    res.status(500).json({ error: '읽지 않은 메시지 정보를 불러오지 못했습니다.' });
+  }
+});
+
+// POST /api/chat/groups/:groupId/read
+// Body: { messageId? }. If omitted, marks the group's latest message as read.
+router.post('/groups/:groupId/read', requireAuth, requireGroupMembership, async (req, res) => {
+  await ensureSchema();
+  const { groupId } = req.chat;
+  const memberId   = req.session.memberId;
+  let messageId    = Number(req.body && req.body.messageId) || 0;
+
+  try {
+    if (!messageId) {
+      const [latestRows] = await pool.execute(
+        'SELECT MAX(id) AS lastId FROM messages WHERE group_id = ?',
+        [groupId]
+      );
+      messageId = Number(latestRows[0] && latestRows[0].lastId) || 0;
+    }
+    await pool.execute(
+      `INSERT INTO group_member_reads (member_id, group_id, last_read_message_id)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id))`,
+      [memberId, groupId, messageId]
+    );
+    res.json({ ok: true, lastReadMessageId: messageId });
+  } catch (e) {
+    console.error('[chat] mark-read failed:', e);
+    res.status(500).json({ error: '읽음 처리에 실패했습니다.' });
   }
 });
 
