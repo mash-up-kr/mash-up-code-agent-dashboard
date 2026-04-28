@@ -112,7 +112,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // 대시보드 탭 렌더링
     if (btn.dataset.tab === 'dashboard') {
       loadUsageSnapshot();
-      connectUsageStream();
     }
   });
 });
@@ -487,6 +486,10 @@ function connect() {
   const es = new EventSource('/api/stream');
 
   es.addEventListener('connected', () => setConnected(true));
+
+  es.addEventListener('usage_update', (e) => {
+    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
+  });
 
   es.addEventListener('init', e => {
     const { sessions: s, events: ev } = JSON.parse(e.data);
@@ -3318,7 +3321,7 @@ function renderUsageTab(data) {
 
       const subheaderRow = `
         <tr class="session-detail hidden border-t border-[#252838]/30">
-          <td class="px-6 py-1.5 pl-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">세션</td>
+          <td class="px-6 py-1.5 pl-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">세션 (최초 명령어)</td>
           <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">사용 토큰</td>
           <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">최근 사용 모델</td>
           <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">캐시 효율</td>
@@ -3331,9 +3334,14 @@ function renderUsageTab(data) {
         const hasLiveSessionActivity = Number.isFinite(liveSessionActivity) && liveSessionActivity > 0;
         const lastAct = hasLiveSessionActivity ? '실시간' : formatUsageLastActivity(sess.lastActivity);
         const sessionLabel = sess.sessionName || sess.name || '—';
+        const sessionLabelDisplay = sessionLabel === '—' ? sessionLabel : sessionLabel + '...';
+        const sessionIdShort = (sess.sessionId || '').slice(0, 8);
         return `
           <tr class="session-detail hidden bg-[#0d0e15]">
-            <td class="px-6 py-2 pl-12 text-slate-400 text-xs font-mono truncate max-w-0">${esc(sessionLabel)}</td>
+            <td class="px-6 py-2 pl-12">
+              <div class="text-slate-400 text-xs font-mono">${esc(sessionLabelDisplay)}</div>
+              ${sessionIdShort ? `<div class="text-[10px] text-slate-600 font-mono mt-0.5">${esc(sessionIdShort)}</div>` : ''}
+            </td>
             <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${((sess.tokens || 0) / 1000).toFixed(1)}K</td>
             <td class="px-6 py-2 text-right text-slate-400 text-xs whitespace-nowrap">${esc(sess.model || '—')}</td>
             <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${sessCacheEff != null ? sessCacheEff + '%' : '—'}</td>
@@ -3417,20 +3425,6 @@ function renderUsageTab(data) {
 }
 
 /* ── Usage SSE + snapshot ────────────────────────── */
-let _usageStream = null;
-
-function connectUsageStream() {
-  if (_usageStream) _usageStream.close();
-  _usageStream = new EventSource('/api/usage/stream');
-  _usageStream.addEventListener('usage_update', (e) => {
-    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
-  });
-  _usageStream.addEventListener('error', () => {
-    setTimeout(() => {
-      fetch('/api/usage/snapshot').then(r => r.json()).then(renderUsageTab).catch(() => {});
-    }, 2000);
-  });
-}
 
 function loadUsageSnapshot() {
   fetch('/api/usage/snapshot')
