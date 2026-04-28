@@ -2,6 +2,7 @@
 
 const { Router } = require('express');
 const bcrypt     = require('bcrypt');
+const crypto     = require('crypto');
 const { pool }   = require('../db');
 
 const router = Router();
@@ -28,15 +29,21 @@ router.post('/register', async (req, res) => {
     if (existing.length > 0) return res.status(409).json({ error: '이미 사용 중인 아이디입니다.' });
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const hookToken = crypto.randomBytes(32).toString('hex');
     const [result] = await pool.execute(
-      'INSERT INTO members (username, password_hash, name) VALUES (?, ?, ?)',
-      [username.trim(), passwordHash, name.trim()]
+      'INSERT INTO members (username, password_hash, name, hook_token) VALUES (?, ?, ?, ?)',
+      [username.trim(), passwordHash, name.trim(), hookToken]
     );
 
     req.session.memberId = result.insertId;
     req.session.username = username.trim();
     req.session.name     = name.trim();
-    res.status(201).json({ memberId: result.insertId, name: name.trim(), username: username.trim() });
+    res.status(201).json({
+      memberId: result.insertId,
+      name: name.trim(),
+      username: username.trim(),
+      hookToken,
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: '회원가입 중 오류가 발생했습니다.' });

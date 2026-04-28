@@ -8,7 +8,23 @@
 #   PreCompact        → pre_compact        (before compaction)
 #   PostCompact       → post_compact       (after compaction)
 #   Others            → passed through as-is
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Hook subprocesses do not inherit dotenv values from the Node server,
+# so load local env files here as well when present.
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  . "$SCRIPT_DIR/.env"
+  set +a
+fi
+if [ -f "$SCRIPT_DIR/.env.local" ]; then
+  set -a
+  . "$SCRIPT_DIR/.env.local"
+  set +a
+fi
+
 PORT="${AGENT_VIZ_PORT:-4321}"
+COMMUNITY_API_URL="${COMMUNITY_API_URL:-http://localhost:$PORT}"
 EVENT_TYPE="${1:-unknown}"
 
 SESSION_CWD="$(pwd 2>/dev/null || echo '')"
@@ -50,5 +66,15 @@ if [ "$EVENT_TYPE" = "session_start" ]; then
 else
   curl -s -m 3 -X POST "http://localhost:$PORT/api/events" \
     -H 'Content-Type: application/json' -d "$PAYLOAD" \
+    >/dev/null 2>&1 || true
+fi
+
+# 커뮤니티 서버로 전송 (COMMUNITY_HOOK_TOKEN 설정 시)
+if [ -n "$COMMUNITY_HOOK_TOKEN" ]; then
+  COMMUNITY_PAYLOAD="{\"hook_event_name\":\"$1\",\"tool_name\":\"${TOOL_NAME:-}\",\"cwd\":\"$SESSION_CWD\",\"session_id\":\"$SID\"}"
+  curl -s -m 3 -X POST "$COMMUNITY_API_URL/api/metrics" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $COMMUNITY_HOOK_TOKEN" \
+    -d "$COMMUNITY_PAYLOAD" \
     >/dev/null 2>&1 || true
 fi

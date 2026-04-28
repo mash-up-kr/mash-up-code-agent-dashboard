@@ -1,5 +1,9 @@
 'use strict';
 
+const COMMUNITY_API = window.location.hostname === 'localhost'
+  ? 'http://localhost:4321'
+  : 'https://your-server-domain.com';
+
 /* ══════════════════════════════════════════════════
    DOM References
    ══════════════════════════════════════════════════ */
@@ -2519,8 +2523,9 @@ document.getElementById('btn-logout')?.addEventListener('click', async () => {
   const confirmed = await showConfirm('로그아웃 하시겠습니까?', '로그아웃');
   if (!confirmed) return;
 
-  await fetch('/api/auth/logout', { method: 'POST' });
+  await fetch(`${COMMUNITY_API}/api/auth/logout`, { method: 'POST' });
   currentUser = null;
+  currentHookToken = null;
   showCommunityGroups();
   renderGroupCards([]);
   openAuthModal('login');
@@ -2530,14 +2535,71 @@ document.getElementById('btn-logout')?.addEventListener('click', async () => {
    Community: 인증
    ══════════════════════════════════════════════════ */
 let currentUser = null; // { memberId, username, name }
+let currentHookToken = null;
+
+async function ensureCommunityHookToken() {
+  if (currentHookToken) return currentHookToken;
+  const res = await fetch(`${COMMUNITY_API}/api/metrics/token`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Claude 토큰을 불러오지 못했습니다.');
+  currentHookToken = data.token;
+  return currentHookToken;
+}
+
+function buildHookEnvExample(token) {
+  return `COMMUNITY_HOOK_TOKEN=${token}`;
+}
+
+function showHookTokenFeedback(message, isError = false) {
+  const el = document.getElementById('hook-token-copy-feedback');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('hidden', 'text-emerald-400', 'text-red-400');
+  el.classList.add(isError ? 'text-red-400' : 'text-emerald-400');
+}
+
+function populateHookTokenModal(token) {
+  document.getElementById('hook-token-value').textContent = token;
+  document.getElementById('hook-token-env-example').textContent = buildHookEnvExample(token);
+}
+
+async function openHookTokenModal(options = {}) {
+  const { firstRun = false, token = null } = options;
+  const modalEl = document.getElementById('modal-hook-token');
+  document.getElementById('hook-token-modal-title').textContent = firstRun
+    ? '회원가입 완료, Claude 연동을 마무리해요'
+    : 'Claude 연동 토큰';
+  document.getElementById('hook-token-modal-subtitle').textContent = firstRun
+    ? '아래 토큰을 `.env.local`에 한 번만 넣으면 그룹 실시간 데이터가 연결됩니다.'
+    : '이 토큰을 `.env.local`에 넣어두면 이후 훅 이벤트가 자동으로 전송됩니다.';
+  document.getElementById('hook-token-copy-feedback').classList.add('hidden');
+
+  try {
+    const resolvedToken = token || await ensureCommunityHookToken();
+    populateHookTokenModal(resolvedToken);
+  } catch (e) {
+    document.getElementById('hook-token-value').textContent = e.message;
+    document.getElementById('hook-token-env-example').textContent = '';
+    showHookTokenFeedback('Claude 토큰을 불러오지 못했습니다.', true);
+  }
+
+  modalEl.classList.remove('hidden');
+  modalEl.classList.add('flex');
+}
+
+function closeHookTokenModal() {
+  const modalEl = document.getElementById('modal-hook-token');
+  modalEl.classList.add('hidden');
+  modalEl.classList.remove('flex');
+}
 
 async function checkAuth() {
   try {
-    const res = await fetch('/api/auth/me');
-    if (!res.ok) { currentUser = null; return false; }
+    const res = await fetch(`${COMMUNITY_API}/api/auth/me`);
+    if (!res.ok) { currentUser = null; currentHookToken = null; return false; }
     currentUser = await res.json();
     return true;
-  } catch (_) { currentUser = null; return false; }
+  } catch (_) { currentUser = null; currentHookToken = null; return false; }
 }
 
 function openAuthModal(tab = 'login') {
@@ -2562,6 +2624,39 @@ function switchAuthTab(tab) {
 document.getElementById('auth-tab-login')?.addEventListener('click', () => switchAuthTab('login'));
 document.getElementById('auth-tab-register')?.addEventListener('click', () => switchAuthTab('register'));
 
+document.getElementById('btn-claude-token')?.addEventListener('click', async () => {
+  document.getElementById('settings-dropdown').classList.add('hidden');
+  if (!currentUser && !await checkAuth()) {
+    openAuthModal('login');
+    return;
+  }
+  await openHookTokenModal();
+});
+
+document.getElementById('btn-hook-token-close')?.addEventListener('click', closeHookTokenModal);
+document.getElementById('btn-hook-token-confirm')?.addEventListener('click', closeHookTokenModal);
+document.getElementById('modal-hook-token')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeHookTokenModal();
+});
+
+document.getElementById('btn-copy-hook-token')?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById('hook-token-value').textContent.trim());
+    showHookTokenFeedback('Claude 토큰을 복사했어요.');
+  } catch (_) {
+    showHookTokenFeedback('복사에 실패했습니다. 직접 선택해서 복사해주세요.', true);
+  }
+});
+
+document.getElementById('btn-copy-hook-env')?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById('hook-token-env-example').textContent);
+    showHookTokenFeedback('.env.local 예시를 복사했어요.');
+  } catch (_) {
+    showHookTokenFeedback('복사에 실패했습니다. 직접 선택해서 복사해주세요.', true);
+  }
+});
+
 document.getElementById('btn-login-submit')?.addEventListener('click', async () => {
   const username = document.getElementById('input-login-username').value.trim();
   const password = document.getElementById('input-login-password').value;
@@ -2573,7 +2668,7 @@ document.getElementById('btn-login-submit')?.addEventListener('click', async () 
   btn.textContent = '로그인 중...';
 
   try {
-    const res  = await fetch('/api/auth/login', {
+    const res  = await fetch(`${COMMUNITY_API}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
@@ -2581,6 +2676,7 @@ document.getElementById('btn-login-submit')?.addEventListener('click', async () 
     if (!res.ok) throw new Error(data.error);
 
     currentUser = data;
+    currentHookToken = null;
     closeAuthModal();
     await refreshGroupList();
   } catch (e) {
@@ -2604,7 +2700,7 @@ document.getElementById('btn-register-submit')?.addEventListener('click', async 
   btn.textContent = '가입 중...';
 
   try {
-    const res  = await fetch('/api/auth/register', {
+    const res  = await fetch(`${COMMUNITY_API}/api/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, name }),
     });
@@ -2612,8 +2708,10 @@ document.getElementById('btn-register-submit')?.addEventListener('click', async 
     if (!res.ok) throw new Error(data.error);
 
     currentUser = data;
+    currentHookToken = data.hookToken || null;
     closeAuthModal();
     await refreshGroupList();
+    await openHookTokenModal({ firstRun: true, token: currentHookToken });
   } catch (e) {
     errorEl.textContent = e.message;
     errorEl.classList.remove('hidden');
@@ -2634,7 +2732,7 @@ function escapeHtml(str) {
 
 async function fetchMyGroups() {
   try {
-    const res = await fetch('/api/community/groups');
+    const res = await fetch(`${COMMUNITY_API}/api/community/groups`);
     if (res.status === 401) return null; // 미로그인
     if (!res.ok) return [];
     return await res.json();
@@ -2805,7 +2903,7 @@ document.getElementById('group-cards')?.addEventListener('click', async e => {
     if (!await showConfirm(`"${groupName}" 그룹에서 나가시겠어요?`, '나가기')) return;
 
     try {
-      const res  = await fetch(`/api/community/groups/${groupId}/leave`, {
+      const res  = await fetch(`${COMMUNITY_API}/api/community/groups/${groupId}/leave`, {
         method:  'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({}),
@@ -2885,7 +2983,7 @@ document.getElementById('btn-join-verify')?.addEventListener('click', async () =
   verifyBtn.textContent = '확인 중...';
 
   try {
-    const res  = await fetch(`/api/community/groups/verify?code=${encodeURIComponent(code)}`);
+    const res  = await fetch(`${COMMUNITY_API}/api/community/groups/verify?code=${encodeURIComponent(code)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
 
@@ -2921,7 +3019,7 @@ document.getElementById('btn-join-confirm')?.addEventListener('click', async () 
   confirmBtn.textContent = '참여 중...';
 
   try {
-    const res  = await fetch('/api/community/groups/join', {
+    const res  = await fetch(`${COMMUNITY_API}/api/community/groups/join`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ code, nickname: document.getElementById('input-join-nickname').value.trim() }),
@@ -2931,7 +3029,7 @@ document.getElementById('btn-join-confirm')?.addEventListener('click', async () 
 
     closeJoinGroupModal();
     await refreshGroupList();
-    showCommunityChat(verifiedMemberCount + 1);
+    showCommunityChat(data.groupId);
   } catch (e) {
     showToast('그룹 참여 실패', e.message, 'error');
     closeJoinGroupModal();
@@ -2993,7 +3091,7 @@ document.getElementById('btn-create-submit')?.addEventListener('click', async ()
   submitBtn.textContent = '생성 중...';
 
   try {
-    const res  = await fetch('/api/community/groups', {
+    const res  = await fetch(`${COMMUNITY_API}/api/community/groups`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ name: groupName, nickname }),
@@ -3003,6 +3101,7 @@ document.getElementById('btn-create-submit')?.addEventListener('click', async ()
 
     document.getElementById('created-group-name').textContent  = data.name;
     document.getElementById('invite-code-display').textContent = data.code;
+    document.getElementById('invite-code-display').dataset.groupId = String(data.groupId);
     modalStepForm.classList.add('hidden');
     modalStepDone.classList.remove('hidden');
   } catch (e) {
@@ -3029,30 +3128,23 @@ document.getElementById('btn-copy-code')?.addEventListener('click', () => {
 });
 
 document.getElementById('btn-enter-created-group')?.addEventListener('click', () => {
+  const createdGroupId = Number(document.getElementById('invite-code-display')?.dataset.groupId || 0);
   closeCreateGroupModal();
   refreshGroupList();
-  showCommunityChat(1);
+  if (createdGroupId) showCommunityChat(createdGroupId);
 });
 
 /* ══════════════════════════════════════════════════
    Community: 그룹 목록 ↔ 채팅 전환
    ══════════════════════════════════════════════════ */
+let _communityStream = null;
+
 function showCommunityGroups() {
+  if (_communityStream) { _communityStream.close(); _communityStream = null; }
   document.getElementById('community-groups')?.classList.remove('hidden');
   document.getElementById('community-chat')?.classList.add('hidden');
 }
 
-const MOCK_MEMBERS = [
-  { memberId: 1, nickname: 'dev_kim',    isOnline: true,  toolCallCount: 1284, sessionCount: 37, cwd: '/Users/kim/projects/mashup-app',     activity: [42, 78, 55, 91, 110, 134, 98]  },
-  { memberId: 2, nickname: 'alpha_lee',  isOnline: true,  toolCallCount: 892,  sessionCount: 21, cwd: '/home/lee/backend-server',            activity: [20, 35, 60, 48, 72, 88, 65]   },
-  { memberId: 3, nickname: 'mace_01',    isOnline: false, toolCallCount: 3041, sessionCount: 58, cwd: null,                                  activity: [120, 95, 140, 88, 102, 76, 30] },
-  { memberId: 4, nickname: 'nova_park',  isOnline: true,  toolCallCount: 447,  sessionCount: 12, cwd: '/Users/park/claude-dashboard',        activity: [10, 22, 18, 44, 38, 55, 42]   },
-  { memberId: 5, nickname: 'sys_choi',   isOnline: false, toolCallCount: 205,  sessionCount: 8,  cwd: null,                                  activity: [30, 12, 25, 8, 15, 20, 5]     },
-  { memberId: 6, nickname: 'core_jung',  isOnline: true,  toolCallCount: 1677, sessionCount: 44, cwd: '/workspace/data-pipeline',            activity: [55, 88, 102, 120, 145, 160, 178] },
-  { memberId: 7, nickname: 'byte_han',   isOnline: true,  toolCallCount: 311,  sessionCount: 9,  cwd: '/home/han/api-gateway',               activity: [5, 8, 12, 6, 40, 85, 45]      },
-  { memberId: 8, nickname: 'null_oh',    isOnline: false, toolCallCount: 728,  sessionCount: 27, cwd: null,                                  activity: [60, 55, 70, 65, 58, 52, 48]   },
-  { memberId: 9, nickname: 'loop_yoon',  isOnline: true,  toolCallCount: 2190, sessionCount: 61, cwd: '/Users/yoon/ml-pipeline',             activity: [80, 110, 95, 130, 120, 145, 160] },
-];
 
 function getMemberStatus(m) {
   if (!m.isOnline) return { label: 'IDLE', color: '#6b7280', bg: 'rgba(107,114,128,0.15)', trend: 'FLAT', lineColor: '#2a2c3e' };
@@ -3066,12 +3158,13 @@ function getMemberStatus(m) {
   const max   = Math.max(...act);
   const min   = Math.min(...act);
   const variance = (max - min) / (max || 1);
+  const recentPeak = Math.max(...act.slice(-10), 0);
 
-  if (variance > 0.65 && last > 40)
+  if (variance > 0.65 && recentPeak >= 3)
     return { label: 'ACTIVE',      color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'ERRATIC', lineColor: '#45dfa4' };
-  if (last > first * 1.35)
+  if (last > Math.max(first * 1.35, 0.5))
     return { label: 'PROCESSING',  color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', trend: 'RISING',  lineColor: '#f59e0b' };
-  if (last < first * 0.65)
+  if (first > 0 && last < first * 0.65)
     return { label: 'SYNCING',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', trend: 'STEADY',  lineColor: '#60a5fa' };
   return   { label: 'CONNECTED',   color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'NOMINAL', lineColor: '#6046ff' };
 }
@@ -3150,9 +3243,13 @@ function renderMemberCard(m) {
 
         <!-- Activity 차트 -->
         <div class="flex flex-col gap-1 flex-1 min-w-0">
-          <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Activity Trend</span>
+          <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Realtime Usage · Last 60 Min</span>
           <div class="flex-1 min-h-0">
             ${renderSparkline(m.activity, status.lineColor, m.memberId)}
+          </div>
+          <div class="flex items-center justify-between text-[8px] font-mono text-slate-600 uppercase tracking-widest">
+            <span>60m ago</span>
+            <span>now</span>
           </div>
         </div>
 
@@ -3194,18 +3291,28 @@ function renderMemberGrid(members) {
   grid.innerHTML = members.map(renderMemberCard).join('');
 }
 
-function showCommunityChat(memberCount) {
+function showCommunityChat(groupId) {
   document.getElementById('community-groups')?.classList.add('hidden');
   document.getElementById('community-chat')?.classList.remove('hidden');
-  renderMemberGrid(MOCK_MEMBERS.slice(0, Math.min(memberCount ?? 9, 9)));
+
+  if (_communityStream) { _communityStream.close(); _communityStream = null; }
+
+  _communityStream = new EventSource(
+    `${COMMUNITY_API}/api/metrics/groups/${groupId}/sse`,
+    { withCredentials: true }
+  );
+  _communityStream.addEventListener('message', e => {
+    try { renderMemberGrid(JSON.parse(e.data)); } catch (_) {}
+  });
+  _communityStream.onerror = () => {};
 }
 
 document.getElementById('view-community')?.addEventListener('click', e => {
   const enterBtn = e.target.closest('.btn-group-enter');
   if (enterBtn) {
-    const card = enterBtn.closest('[data-member-count]');
-    const memberCount = Number(card?.dataset.memberCount) || 1;
-    showCommunityChat(memberCount);
+    const card = enterBtn.closest('[data-group-id]');
+    const groupId = Number(card?.dataset.groupId);
+    if (groupId) showCommunityChat(groupId);
   }
   if (e.target.closest('#btn-group-back')) showCommunityGroups();
 });
