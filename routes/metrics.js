@@ -188,6 +188,56 @@ setInterval(async () => {
 }, 60 * 1000);
 
 // ── 훅 토큰 발급 ─────────────────────────────────────
+router.get('/env-installer', (_req, res) => {
+  res.type('text/x-shellscript').send(`#!/bin/sh
+set -eu
+
+TOKEN="\${1:-}"
+API_URL="\${2:-}"
+ENV_FILE=".env.local"
+
+if [ -z "$TOKEN" ]; then
+  echo "Usage: curl -fsSL <dashboard>/api/metrics/env-installer | sh -s -- <hook-token> [api-url]" >&2
+  exit 1
+fi
+
+upsert_env() {
+  key="$1"
+  value="$2"
+  file="$3"
+  tmp="$file.tmp.$$"
+
+  if [ -f "$file" ]; then
+    awk -v key="$key" -v value="$value" '
+      BEGIN { written = 0 }
+      $0 ~ "^" key "=" {
+        if (!written) {
+          print key "=" value
+          written = 1
+        }
+        next
+      }
+      { print }
+      END {
+        if (!written) print key "=" value
+      }
+    ' "$file" > "$tmp"
+  else
+    printf '%s=%s\\n' "$key" "$value" > "$tmp"
+  fi
+
+  mv "$tmp" "$file"
+}
+
+upsert_env "COMMUNITY_HOOK_TOKEN" "$TOKEN" "$ENV_FILE"
+if [ -n "$API_URL" ]; then
+  upsert_env "COMMUNITY_API_URL" "$API_URL" "$ENV_FILE"
+fi
+
+echo "Updated $ENV_FILE"
+`);
+});
+
 router.get('/token', async (req, res) => {
   if (!req.session.memberId) return res.status(401).json({ error: '로그인이 필요합니다.' });
 

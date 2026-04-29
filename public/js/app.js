@@ -1,8 +1,6 @@
 'use strict';
 
-const COMMUNITY_API = window.location.hostname === 'localhost'
-  ? 'http://localhost:4321'
-  : 'https://your-server-domain.com';
+const COMMUNITY_API = window.MASHUP_DASHBOARD_CONFIG?.communityApiUrl || window.location.origin;
 
 /* ══════════════════════════════════════════════════
    DOM References
@@ -2553,8 +2551,12 @@ async function ensureCommunityHookToken() {
   return currentHookToken;
 }
 
-function buildHookEnvExample(token) {
-  return `COMMUNITY_HOOK_TOKEN=${token}`;
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function buildHookEnvInstallCommand(token) {
+  return `curl -fsSL ${COMMUNITY_API}/api/metrics/env-installer | sh -s -- ${shellQuote(token)} ${shellQuote(COMMUNITY_API)}`;
 }
 
 function showHookTokenFeedback(message, isError = false) {
@@ -2567,7 +2569,7 @@ function showHookTokenFeedback(message, isError = false) {
 
 function populateHookTokenModal(token) {
   document.getElementById('hook-token-value').textContent = token;
-  document.getElementById('hook-token-env-example').textContent = buildHookEnvExample(token);
+  document.getElementById('hook-token-install-command').textContent = buildHookEnvInstallCommand(token);
 }
 
 async function openHookTokenModal(options = {}) {
@@ -2586,7 +2588,7 @@ async function openHookTokenModal(options = {}) {
     populateHookTokenModal(resolvedToken);
   } catch (e) {
     document.getElementById('hook-token-value').textContent = e.message;
-    document.getElementById('hook-token-env-example').textContent = '';
+    document.getElementById('hook-token-install-command').textContent = '';
     showHookTokenFeedback('Claude 토큰을 불러오지 못했습니다.', true);
   }
 
@@ -2655,10 +2657,10 @@ document.getElementById('btn-copy-hook-token')?.addEventListener('click', async 
   }
 });
 
-document.getElementById('btn-copy-hook-env')?.addEventListener('click', async () => {
+document.getElementById('btn-copy-hook-install')?.addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText(document.getElementById('hook-token-env-example').textContent);
-    showHookTokenFeedback('.env.local 예시를 복사했어요.');
+    await navigator.clipboard.writeText(document.getElementById('hook-token-install-command').textContent);
+    showHookTokenFeedback('자동 설정 명령을 복사했어요.');
   } catch (_) {
     showHookTokenFeedback('복사에 실패했습니다. 직접 선택해서 복사해주세요.', true);
   }
