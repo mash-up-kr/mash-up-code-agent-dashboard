@@ -60,7 +60,6 @@
           closeAllConnections();
           activeGroupId = null;
           clearMessagesUI();
-          renderMemberMascots([]);
         }
         setInputsDisabled(true, '로그인 후 이용할 수 있습니다.');
       }
@@ -194,35 +193,8 @@
     });
   }
 
-  function renderMemberMascots(members) {
-    const grid = document.getElementById('member-grid');
-    if (!grid) return;
-    if (!Array.isArray(members) || members.length === 0) {
-      grid.innerHTML = '';
-      return;
-    }
-    grid.innerHTML = members.map(m => {
-      const nick = m.nickname || `member_${m.memberId}`;
-      return `
-        <div class="bg-[#13151f] border border-[#6046ff]/40 rounded-xl flex flex-col items-center justify-center transition-colors p-2">
-          <img src="/img/mascot_waiting.png" alt="${escHtml(nick)}" class="w-16 h-16 object-contain">
-          <span class="text-xs text-slate-200 font-bold mt-3 truncate max-w-[90%]">${escHtml(nick)}</span>
-          <div class="flex items-center gap-1 mt-1">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span class="text-[9px] text-emerald-400">online</span>
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  // Suppress the placeholder "대기 중" tiles app.js would otherwise render.
-  if (typeof window !== 'undefined') {
-    window.renderMemberGrid = function () {
-      const grid = document.getElementById('member-grid');
-      if (grid) grid.innerHTML = '';
-    };
-  }
+  // The mascot grid (#member-grid) is intentionally left to app.js's
+  // original renderMemberGrid placeholder rendering. We don't override it.
 
   // ─── Connection management ─────────────────────────────────
 
@@ -292,7 +264,7 @@
     es.addEventListener('presence', (e) => {
       let data; try { data = JSON.parse(e.data); } catch (_) { return; }
       conn.presence = Array.isArray(data.members) ? data.members : [];
-      if (id === activeGroupId) renderMemberMascots(conn.presence);
+      // mascot grid is rendered by app.js placeholder logic — no override here
     });
 
     es.onerror = () => { /* browser auto-reconnects */ };
@@ -312,7 +284,6 @@
     if (id === activeGroupId) {
       activeGroupId = null;
       clearMessagesUI();
-      renderMemberMascots([]);
       setInputsDisabled(true, '그룹에 입장하면 채팅이 시작됩니다.');
       renderIdleState();
     }
@@ -380,7 +351,6 @@
   function clearActiveGroup() {
     activeGroupId = null;
     clearMessagesUI();
-    renderMemberMascots([]);
     setInputsDisabled(true, '그룹에 입장하면 채팅이 시작됩니다.');
     renderIdleState();
   }
@@ -394,7 +364,6 @@
       if (m._system) appendSystemUI(m.text);
       else appendMessageUI(m);
     }
-    renderMemberMascots(conn.presence);
   }
 
   // ─── Sending ───────────────────────────────────────────────
