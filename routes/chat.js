@@ -53,10 +53,10 @@ async function ensureSchema() {
         group_id             INT       NOT NULL,
         last_read_message_id BIGINT    DEFAULT 0,
         updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (member_id, group_id),
-        INDEX idx_member (member_id)
+        PRIMARY KEY (member_id, group_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    try { await pool.execute('ALTER TABLE group_member_reads DROP INDEX idx_member'); } catch (_) {}
   })();
   // Don't cache failures — clear schemaReady so the next call can retry.
   schemaReady.catch(() => { schemaReady = null; });
@@ -243,22 +243,19 @@ router.get('/unread', requireAuth, async (req, res) => {
     const [rows] = await pool.execute(`
       SELECT
         gm.group_id AS groupId,
-        COALESCE(latest.last_id, 0) AS lastMessageId,
+        COALESCE(MAX(m.id), 0) AS lastMessageId,
         COALESCE(r.last_read_message_id, 0) AS lastReadId,
-        COALESCE((
-          SELECT COUNT(*) FROM messages
-           WHERE group_id = gm.group_id
-             AND id > COALESCE(r.last_read_message_id, 0)
-        ), 0) AS unreadCount
+        COALESCE(SUM(CASE
+          WHEN m.id > COALESCE(r.last_read_message_id, 0) THEN 1
+          ELSE 0
+        END), 0) AS unreadCount
       FROM group_members gm
-      LEFT JOIN (
-        SELECT group_id, MAX(id) AS last_id
-          FROM messages
-         GROUP BY group_id
-      ) latest ON latest.group_id = gm.group_id
       LEFT JOIN group_member_reads r
         ON r.group_id = gm.group_id AND r.member_id = gm.member_id
+      LEFT JOIN messages m
+        ON m.group_id = gm.group_id
       WHERE gm.member_id = ?
+      GROUP BY gm.group_id, r.last_read_message_id
     `, [memberId]);
     res.json({
       unread: rows.map(r => ({

@@ -76,7 +76,11 @@
         <button id="btn-settings" class="p-2 text-slate-400 hover:bg-[#1c1f2e] transition-colors rounded cursor-pointer">
           <span class="material-symbols-outlined text-[20px]">settings</span>
         </button>
-        <div id="settings-dropdown" class="hidden absolute right-0 top-10 w-40 bg-[#1c1f2e] border border-[#252838] rounded-lg shadow-xl py-1 z-50">
+        <div id="settings-dropdown" class="hidden absolute right-0 top-10 w-52 bg-[#1c1f2e] border border-[#252838] rounded-lg shadow-xl py-1 z-50">
+          <button id="btn-claude-token" class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-[#252838] hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">key</span>
+            Claude 토큰 보기
+          </button>
           <button id="btn-logout" class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-[#252838] hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
             <span class="material-symbols-outlined text-[16px]">logout</span>
             로그아웃
@@ -537,7 +541,7 @@
 
       <!-- User dashboard grid (right) -->
       <div class="flex-1 overflow-y-auto p-4 pl-0">
-        <div id="member-grid" class="grid grid-cols-3 gap-3" style="grid-auto-rows: calc((100vh - 64px - 48px - 32px) / 4);"></div>
+        <div id="member-grid" class="grid grid-cols-3 gap-3" style="grid-auto-rows: calc((100vh - 64px - 48px - 32px) / 3);"></div>
       </div>
 
     </div>
@@ -706,6 +710,67 @@
   </div>
 </div>
 
+<!-- Modal: Claude 연동 토큰                         -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-hook-token" class="fixed inset-0 z-[220] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+  <div class="bg-[#13151f] border border-[#252838] rounded-2xl w-[560px] max-w-[92vw] shadow-2xl overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[#252838]">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-[#6046ff]/15 text-[#c6bfff] flex items-center justify-center">
+          <span class="material-symbols-outlined text-[20px]">key</span>
+        </div>
+        <div>
+          <p id="hook-token-modal-title" class="text-base font-bold text-white">Claude 연동 토큰</p>
+          <p id="hook-token-modal-subtitle" class="text-xs text-slate-500 mt-1">한 번만 설정하면 이후엔 훅이 자동으로 전송됩니다.</p>
+        </div>
+      </div>
+      <button id="btn-hook-token-close" class="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-1">
+        <span class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+    <div class="p-6 space-y-5">
+      <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-[11px] font-bold uppercase tracking-widest text-slate-500">Claude Hook Token</span>
+          <button id="btn-copy-hook-token" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6046ff]/15 text-[#c6bfff] hover:bg-[#6046ff]/25 transition-colors text-xs font-bold cursor-pointer">
+            <span class="material-symbols-outlined text-[15px]">content_copy</span>
+            복사
+          </button>
+        </div>
+        <code id="hook-token-value" class="block break-all rounded-lg border border-[#252838] bg-[#11131d] px-3 py-3 font-mono text-[12px] text-slate-200">불러오는 중...</code>
+      </div>
+
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4">
+          <p class="text-sm font-bold text-white">1. 로컬 환경에 추가</p>
+          <p class="mt-2 text-xs leading-5 text-slate-400">이 프로젝트 루트에 `.env.local` 파일을 만들고 아래 토큰 한 줄만 넣어주세요.</p>
+        </div>
+        <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4">
+          <p class="text-sm font-bold text-white">2. Claude 다시 시작</p>
+          <p class="mt-2 text-xs leading-5 text-slate-400">설정 저장 후 Claude를 다시 열면, 이후 훅 이벤트부터 그룹 실시간 현황에 자동 반영됩니다.</p>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-[11px] font-bold uppercase tracking-widest text-slate-500">.env.local 예시</span>
+          <button id="btn-copy-hook-env" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#252838] text-slate-300 hover:border-[#474556] hover:text-white transition-colors text-xs font-bold cursor-pointer">
+            <span class="material-symbols-outlined text-[15px]">terminal</span>
+            예시 복사
+          </button>
+        </div>
+        <pre id="hook-token-env-example" class="overflow-x-auto rounded-lg border border-[#252838] bg-[#11131d] px-3 py-3 text-[12px] leading-5 text-slate-300 font-mono"></pre>
+      </div>
+
+      <p id="hook-token-copy-feedback" class="text-xs text-emerald-400 hidden">복사됐어요.</p>
+
+      <div class="flex justify-end">
+        <button id="btn-hook-token-confirm" class="px-4 py-2.5 rounded-lg bg-[#6046ff] hover:bg-[#725bff] text-white text-sm font-bold transition-colors cursor-pointer">확인했어요</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: 확인 다이얼로그                           -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="modal-confirm" class="fixed inset-0 z-[250] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -824,6 +889,86 @@
           </button>
         </div>
         <p class="text-[10px] text-slate-600 mt-3 font-mono">이 코드를 팀원에게 공유하세요</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- Modal: 멤버 활동 상세                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modal-member-stats" class="fixed inset-0 z-[220] hidden items-center justify-center bg-black/80 backdrop-blur-sm">
+  <div class="bg-[#10131d] border border-[#252838] rounded-2xl w-[960px] max-w-[94vw] max-h-[88vh] shadow-2xl overflow-hidden flex flex-col">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[#252838]">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-11 h-11 rounded-xl bg-[#171b28] border border-[#252838] flex items-center justify-center overflow-hidden flex-shrink-0">
+          <img src="/img/mascot_waiting.png" alt="mascot" class="w-8 h-8 object-contain">
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <h2 id="member-stats-title" class="text-lg font-bold text-white truncate">멤버 활동 상세</h2>
+            <span id="member-stats-status" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-widest text-slate-400 bg-slate-500/10 border border-slate-500/20">IDLE</span>
+          </div>
+          <p id="member-stats-subtitle" class="text-xs text-slate-500 font-mono mt-1">최근 60분 토큰 활동</p>
+        </div>
+      </div>
+      <button id="btn-member-stats-close" class="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-1">
+        <span class="material-symbols-outlined text-xl">close</span>
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-6 bg-[#0b0d15]">
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.9fr)_300px] gap-6">
+        <section class="bg-[#13151f] border border-[#252838] rounded-2xl p-5">
+          <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <p class="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-widest">Expanded Activity</p>
+              <h3 class="text-white font-semibold text-lg mt-1">프로젝트별 토큰 흐름 + 이벤트 포인트</h3>
+            </div>
+            <div class="text-right">
+              <p class="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Window</p>
+              <p class="text-xs text-slate-400">Last 60 min</p>
+            </div>
+          </div>
+
+          <div id="member-stats-project-chips" class="flex flex-wrap gap-2 mb-4"></div>
+
+          <div class="rounded-2xl border border-[#252838] bg-[#0d1018] p-4">
+            <div class="flex items-center justify-between text-[10px] font-mono text-slate-600 uppercase tracking-widest mb-3">
+              <span>60m ago</span>
+              <span>now</span>
+            </div>
+            <div id="member-stats-chart" class="relative h-[360px]"></div>
+          </div>
+        </section>
+
+        <aside class="space-y-4">
+          <div class="bg-[#13151f] border border-[#252838] rounded-2xl p-5">
+            <p class="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-4">Quick Stats</p>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="rounded-xl border border-[#252838] bg-[#0d1018] px-4 py-3">
+                <p class="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Tool Calls</p>
+                <p id="member-stats-tool-calls" class="text-2xl font-bold font-mono text-[#c6bfff] mt-1">0</p>
+              </div>
+              <div class="rounded-xl border border-[#252838] bg-[#0d1018] px-4 py-3">
+                <p class="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Sessions</p>
+                <p id="member-stats-sessions" class="text-2xl font-bold font-mono text-[#c6bfff] mt-1">0</p>
+              </div>
+            </div>
+            <div class="rounded-xl border border-[#252838] bg-[#0d1018] px-4 py-3 mt-3">
+              <p class="text-[10px] font-mono text-slate-600 uppercase tracking-widest">Last Active</p>
+              <p id="member-stats-last-active" class="text-sm text-slate-300 font-mono mt-1">—</p>
+            </div>
+          </div>
+
+          <div class="bg-[#13151f] border border-[#252838] rounded-2xl p-5">
+            <div class="flex items-center justify-between mb-4">
+              <p class="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-widest">Recent Token Events</p>
+              <p id="member-stats-event-count" class="text-[10px] font-mono text-slate-600">0 events</p>
+            </div>
+            <div id="member-stats-events" class="space-y-2 max-h-[280px] overflow-y-auto"></div>
+          </div>
+        </aside>
       </div>
     </div>
   </div>
