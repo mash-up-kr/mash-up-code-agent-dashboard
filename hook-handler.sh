@@ -71,7 +71,25 @@ fi
 
 # 커뮤니티 서버로 전송 (COMMUNITY_HOOK_TOKEN 설정 시)
 if [ -n "$COMMUNITY_HOOK_TOKEN" ]; then
-  COMMUNITY_PAYLOAD="{\"hook_event_name\":\"$1\",\"tool_name\":\"${TOOL_NAME:-}\",\"cwd\":\"$SESSION_CWD\",\"session_id\":\"$SID\"}"
+  OUTPUT_TOKENS=0
+  INPUT_TOKENS=0
+  # Stop 훅 stdin에는 토큰 데이터가 없어 transcript_path의 JSONL 마지막 항목에서 읽어옴
+  if [ "$1" = "Stop" ]; then
+    TRANSCRIPT=$(printf '%s' "$INPUT" \
+      | grep -Eo '"transcript_path"[[:space:]]*:[[:space:]]*"[^"]*"' \
+      | head -1 \
+      | sed -E 's/^"transcript_path"[[:space:]]*:[[:space:]]*"([^"]*)"$/\1/')
+    if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ]; then
+      LAST_USAGE=$(tail -n 30 "$TRANSCRIPT" | grep '"output_tokens"' | tail -1)
+      OUTPUT_TOKENS=$(printf '%s' "$LAST_USAGE" \
+        | grep -Eo '"output_tokens"[[:space:]]*:[[:space:]]*[0-9]+' \
+        | head -1 | grep -Eo '[0-9]+$' || echo '0')
+      INPUT_TOKENS=$(printf '%s' "$LAST_USAGE" \
+        | grep -Eo '"input_tokens"[[:space:]]*:[[:space:]]*[0-9]+' \
+        | head -1 | grep -Eo '[0-9]+$' || echo '0')
+    fi
+  fi
+  COMMUNITY_PAYLOAD="{\"hook_event_name\":\"$1\",\"tool_name\":\"${TOOL_NAME:-}\",\"cwd\":\"$SESSION_CWD\",\"session_id\":\"$SID\",\"output_tokens\":${OUTPUT_TOKENS:-0},\"input_tokens\":${INPUT_TOKENS:-0}}"
   curl -s -m 3 -X POST "$COMMUNITY_API_URL/api/metrics" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $COMMUNITY_HOOK_TOKEN" \

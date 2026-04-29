@@ -12,8 +12,10 @@ const memberMetrics = new Map();
 // SSE 클라이언트: groupId -> Set<res>
 const groupClients = new Map();
 
-const ONLINE_THRESHOLD_MS = 5 * 60 * 1000; // 5분
-const ACTIVITY_WINDOW_MINUTES = 60;
+const ONLINE_THRESHOLD_MS = 5 * 60 * 1000;  // 5분
+const SESSION_TIMEOUT_MS  = 5 * 60 * 1000;  // 5분
+const BUCKET_SIZE_MS = 60 * 1000;           // 1분 단위
+const ACTIVITY_WINDOW_BUCKETS = 60;         // 60 × 1분 = 60분 (토큰 합산)
 
 function isOnline(metrics) {
   if (!metrics?.lastActiveAt) return false;
@@ -22,12 +24,38 @@ function isOnline(metrics) {
 
 function getMetrics(memberId) {
   return memberMetrics.get(memberId) ?? {
-    lastActiveAt:   null,
-    toolCallCount:  0,
-    sessionCount:   0,
-    cwd:            null,
-    activityByMinute: {},
+    lastActiveAt:      null,
+    toolCallCount:     0,
+    sessionCount:      0,
+    cwd:               null,
+    activityBySession: {}, // { [session_id]: { project: string, buckets: { [bucket]: tokens } } }
+    recentTokenEvents: [], // [{ sessionId, project, hookEventName, tokens, ts }]
+    activeSessions:    new Map(), // session_id → { ts, cwd }
+    seenSessions:      new Set(),
   };
+}
+
+function countActiveSessions(activeSessions) {
+  const cutoff = Date.now() - SESSION_TIMEOUT_MS;
+  return [...activeSessions.values()].filter(({ ts }) => ts > cutoff).length;
+}
+
+function getActiveProjects(activeSessions) {
+  const cutoff = Date.now() - SESSION_TIMEOUT_MS;
+  const projects = new Set();
+  for (const { ts, cwd } of activeSessions.values()) {
+    if (ts > cutoff && cwd) projects.add(extractProject(cwd));
+  }
+  return [...projects].filter(Boolean);
+}
+
+function getActiveSessionIds(activeSessions, now = Date.now()) {
+  const cutoff = now - SESSION_TIMEOUT_MS;
+  return new Set(
+    [...(activeSessions || new Map()).entries()]
+      .filter(([, { ts }]) => ts > cutoff)
+      .map(([sid]) => sid)
+  );
 }
 
 function extractProject(cwd) {
@@ -36,29 +64,77 @@ function extractProject(cwd) {
 }
 
 function minuteBucketKey(ts = Date.now()) {
-  return Math.floor(ts / 60000);
+  return Math.floor(ts / BUCKET_SIZE_MS);
 }
 
-function pruneActivityBuckets(activityByMinute, nowBucket = minuteBucketKey()) {
+function pruneSessionActivities(activityBySession, nowBucket = minuteBucketKey()) {
+  const minBucket = nowBucket - ACTIVITY_WINDOW_BUCKETS + 1;
   const next = {};
-  const minBucket = nowBucket - ACTIVITY_WINDOW_MINUTES + 1;
-  for (const [bucket, count] of Object.entries(activityByMinute || {})) {
-    const n = Number(bucket);
-    if (n >= minBucket && n <= nowBucket && count > 0) next[n] = count;
+  for (const [sid, entry] of Object.entries(activityBySession || {})) {
+    const prunedBuckets = {};
+    for (const [b, tokens] of Object.entries(entry.buckets || {})) {
+      const n = Number(b);
+      if (n >= minBucket && n <= nowBucket && tokens > 0) prunedBuckets[n] = tokens;
+    }
+    if (Object.keys(prunedBuckets).length > 0) {
+      next[sid] = { project: entry.project, buckets: prunedBuckets };
+    }
   }
   return next;
 }
 
-function buildRealtimeActivity(metrics, nowBucket = minuteBucketKey()) {
-  const pruned = pruneActivityBuckets(metrics?.activityByMinute, nowBucket);
-  if (metrics) metrics.activityByMinute = pruned;
+function pruneRecentTokenEvents(events, now = Date.now()) {
+  const cutoff = now - (ACTIVITY_WINDOW_BUCKETS * BUCKET_SIZE_MS);
+  return (events || []).filter((event) => {
+    const ts = new Date(event.ts).getTime();
+    return Number.isFinite(ts) && ts >= cutoff;
+  }).slice(-24);
+}
 
-  const buckets = [];
-  for (let i = ACTIVITY_WINDOW_MINUTES - 1; i >= 0; i--) {
-    const bucket = nowBucket - i;
-    buckets.push(pruned[bucket] || 0);
+function buildSessionActivities(metrics, nowBucket = minuteBucketKey(), options = {}) {
+  const pruned = pruneSessionActivities(metrics?.activityBySession, nowBucket);
+  if (metrics) metrics.activityBySession = pruned;
+  const activeSessionIds = options.activeOnly
+    ? getActiveSessionIds(metrics?.activeSessions, nowBucket * BUCKET_SIZE_MS)
+    : null;
+
+  // 같은 프로젝트의 여러 세션은 토큰을 합산해서 하나의 라인으로
+  const byProject = new Map();
+  for (const [sid, entry] of Object.entries(pruned)) {
+    if (activeSessionIds && !activeSessionIds.has(sid)) continue;
+    const tokens = [];
+    for (let i = ACTIVITY_WINDOW_BUCKETS - 1; i >= 0; i--) {
+      tokens.push(entry.buckets[nowBucket - i] || 0);
+    }
+    if (byProject.has(entry.project)) {
+      const existing = byProject.get(entry.project);
+      byProject.set(entry.project, existing.map((v, i) => v + tokens[i]));
+    } else {
+      byProject.set(entry.project, tokens);
+    }
   }
-  return buckets;
+
+  return [...byProject.entries()].map(([project, tokens]) => ({ project, tokens }));
+}
+
+function serializeGroupMembers(rows, nowBucket = minuteBucketKey()) {
+  return rows.map(r => {
+    const metrics = getMetrics(r.id);
+    return {
+      memberId:           r.id,
+      name:               r.name,
+      nickname:           r.nickname,
+      isCreator:          Boolean(r.is_creator),
+      isOnline:           isOnline(metrics),
+      lastActiveAt:       metrics.lastActiveAt,
+      toolCallCount:      metrics.toolCallCount,
+      sessionCount:       metrics.sessionCount,
+      activeSessionCount: countActiveSessions(metrics.activeSessions ?? new Map()),
+      activeProjects:     getActiveProjects(metrics.activeSessions ?? new Map()),
+      cwd:                metrics.cwd,
+      sessionActivity:    buildSessionActivities(metrics, nowBucket, { activeOnly: true }),
+    };
+  });
 }
 
 // 특정 그룹의 전체 SSE 클라이언트에게 멤버 현황 브로드캐스트
@@ -69,28 +145,13 @@ async function broadcastGroupUpdate(groupId) {
   const [rows] = await pool.execute(`
     SELECT m.id, m.name, gm.nickname, gm.is_creator
     FROM group_members gm
-    JOIN members m ON m.id = gm.member_id
+           JOIN members m ON m.id = gm.member_id
     WHERE gm.group_id = ?
     ORDER BY gm.joined_at ASC
   `, [groupId]);
 
   const nowBucket = minuteBucketKey();
-
-  const members = rows.map(r => {
-    const metrics = getMetrics(r.id);
-    return {
-      memberId:      r.id,
-      name:          r.name,
-      nickname:      r.nickname,
-      isCreator:     Boolean(r.is_creator),
-      isOnline:      isOnline(metrics),
-      lastActiveAt:  metrics.lastActiveAt,
-      toolCallCount: metrics.toolCallCount,
-      sessionCount:  metrics.sessionCount,
-      cwd:           metrics.cwd,
-      activity:      buildRealtimeActivity(metrics, nowBucket),
-    };
-  });
+  const members = serializeGroupMembers(rows, nowBucket);
 
   const msg = `data: ${JSON.stringify(members)}\n\n`;
   for (const res of [...clients]) {
@@ -98,7 +159,7 @@ async function broadcastGroupUpdate(groupId) {
   }
 }
 
-// 오프라인 전환 감지 + 60분 롤링 창 갱신
+// 오프라인 전환 감지 + 10분 롤링 창 갱신
 const prevOnlineStatus = new Map();
 
 setInterval(async () => {
@@ -111,8 +172,8 @@ setInterval(async () => {
       prevOnlineStatus.set(memberId, curr);
       try {
         const [rows] = await pool.execute(
-          'SELECT group_id FROM group_members WHERE member_id = ?',
-          [memberId]
+            'SELECT group_id FROM group_members WHERE member_id = ?',
+            [memberId]
         );
         for (const { group_id } of rows) changedGroups.add(group_id);
       } catch (_) {}
@@ -151,21 +212,60 @@ router.post('/', async (req, res) => {
   if (rows.length === 0) return res.status(401).json({ error: '유효하지 않은 토큰입니다.' });
 
   const memberId = rows[0].id;
-  const { hook_event_name, tool_name, cwd, session_id } = req.body;
+  const { hook_event_name, tool_name, cwd, session_id, output_tokens, input_tokens } = req.body;
 
   const cur = memberMetrics.get(memberId) ?? { toolCallCount: 0, sessionCount: 0 };
   const updated = {
     ...cur,
-    lastActiveAt: new Date().toISOString(),
-    cwd:          cwd || cur.cwd,
-    activityByMinute: pruneActivityBuckets(cur.activityByMinute),
+    lastActiveAt:      new Date().toISOString(),
+    cwd:               cwd || cur.cwd,
+    activityBySession: pruneSessionActivities(cur.activityBySession ?? {}),
+    recentTokenEvents: pruneRecentTokenEvents(cur.recentTokenEvents ?? []),
+    seenSessions:      cur.seenSessions  ?? new Set(),
+    activeSessions:    cur.activeSessions ?? new Map(),
   };
+  if (session_id) {
+    if (hook_event_name === 'SessionStart') {
+      updated.activeSessions.set(session_id, { ts: Date.now(), cwd: cwd || cur.cwd });
+    } else if (hook_event_name === 'SessionEnd') {
+      updated.activeSessions.delete(session_id);
+    } else {
+      // 그 외 훅은 기존 세션 ts·cwd 갱신 (없으면 신규 등록)
+      updated.activeSessions.set(session_id, { ts: Date.now(), cwd: cwd || cur.cwd });
+    }
+  }
   if (hook_event_name === 'PostToolUse') {
     updated.toolCallCount = (cur.toolCallCount || 0) + 1;
-    const bucket = minuteBucketKey();
-    updated.activityByMinute[bucket] = (updated.activityByMinute[bucket] || 0) + 1;
   }
-  if (hook_event_name === 'Stop')        updated.sessionCount  = (cur.sessionCount  || 0) + 1;
+  if (hook_event_name === 'Stop') {
+    const inputTokens = Number(input_tokens) || 0;
+    const outputTokens = Number(output_tokens) || 0;
+    const tokens = inputTokens + outputTokens;
+    console.log(
+      `[metrics] Stop event memberId=${memberId} session=${session_id} input_tokens=${input_tokens} output_tokens=${output_tokens} parsed=${tokens}`
+    );
+    if (tokens > 0 && session_id) {
+      const bucket = minuteBucketKey();
+      const project = extractProject(cwd || cur.cwd) || session_id.slice(0, 8);
+      if (!updated.activityBySession[session_id]) {
+        updated.activityBySession[session_id] = { project, buckets: {} };
+      }
+      updated.activityBySession[session_id].buckets[bucket] =
+          (updated.activityBySession[session_id].buckets[bucket] || 0) + tokens;
+      updated.recentTokenEvents.push({
+        sessionId: session_id,
+        project,
+        hookEventName: hook_event_name,
+        tokens,
+        ts: new Date().toISOString(),
+      });
+      updated.recentTokenEvents = pruneRecentTokenEvents(updated.recentTokenEvents);
+    }
+  }
+  if (hook_event_name === 'Stop' && session_id && !updated.seenSessions.has(session_id)) {
+    updated.seenSessions.add(session_id);
+    updated.sessionCount = (cur.sessionCount || 0) + 1;
+  }
   memberMetrics.set(memberId, updated);
   prevOnlineStatus.set(memberId, true);
 
@@ -173,15 +273,15 @@ router.post('/', async (req, res) => {
   if (hook_event_name === 'PostToolUse' || hook_event_name === 'Stop') {
     const projectName = extractProject(cwd);
     await pool.execute(
-      'INSERT INTO member_events (member_id, session_id, hook_event, tool_name, cwd, project_name) VALUES (?, ?, ?, ?, ?, ?)',
-      [memberId, session_id || null, hook_event_name, tool_name || null, cwd || null, projectName]
+        'INSERT INTO member_events (member_id, session_id, hook_event, tool_name, cwd, project_name) VALUES (?, ?, ?, ?, ?, ?)',
+        [memberId, session_id || null, hook_event_name, tool_name || null, cwd || null, projectName]
     ).catch(e => console.error('metrics insert error:', e));
   }
 
   // 해당 멤버가 속한 그룹들에 SSE 브로드캐스트
   const [groupRows] = await pool.execute(
-    'SELECT group_id FROM group_members WHERE member_id = ?',
-    [memberId]
+      'SELECT group_id FROM group_members WHERE member_id = ?',
+      [memberId]
   );
   for (const { group_id } of groupRows) {
     broadcastGroupUpdate(group_id).catch(() => {});
@@ -197,8 +297,8 @@ router.get('/groups/:groupId/sse', async (req, res) => {
   const groupId = Number(req.params.groupId);
 
   const [membership] = await pool.execute(
-    'SELECT id FROM group_members WHERE group_id = ? AND member_id = ?',
-    [groupId, req.session.memberId]
+      'SELECT id FROM group_members WHERE group_id = ? AND member_id = ?',
+      [groupId, req.session.memberId]
   );
   if (membership.length === 0) return res.status(403).json({ error: '그룹 멤버가 아닙니다.' });
 
@@ -233,28 +333,13 @@ router.get('/groups/:groupId/members', async (req, res) => {
   const [rows] = await pool.execute(`
     SELECT m.id, m.name, gm.nickname, gm.is_creator
     FROM group_members gm
-    JOIN members m ON m.id = gm.member_id
+           JOIN members m ON m.id = gm.member_id
     WHERE gm.group_id = ?
     ORDER BY gm.joined_at ASC
   `, [groupId]);
 
   const nowBucket = minuteBucketKey();
-
-  const members = rows.map(r => {
-    const metrics = getMetrics(r.id);
-    return {
-      memberId:      r.id,
-      name:          r.name,
-      nickname:      r.nickname,
-      isCreator:     Boolean(r.is_creator),
-      isOnline:      isOnline(metrics),
-      lastActiveAt:  metrics.lastActiveAt,
-      toolCallCount: metrics.toolCallCount,
-      sessionCount:  metrics.sessionCount,
-      cwd:           metrics.cwd,
-      activity:      buildRealtimeActivity(metrics, nowBucket),
-    };
-  });
+  const members = serializeGroupMembers(rows, nowBucket);
 
   res.json(members);
 });
@@ -266,37 +351,9 @@ router.get('/members/:memberId/stats', async (req, res) => {
   const memberId = Number(req.params.memberId);
   const metrics  = getMetrics(memberId);
   const online   = isOnline(metrics);
-
-  const [grassRows] = await pool.execute(`
-    SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
-    FROM member_events
-    WHERE member_id = ?
-      AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
-      AND hook_event = 'PostToolUse'
-    GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
-    ORDER BY date ASC
-  `, [memberId]);
-
-  const grassMap = new Map(grassRows.map(r => [r.date, Number(r.count)]));
-  const grass = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    grass.push({ date: dateStr, count: grassMap.get(dateStr) ?? 0 });
-  }
-
-  const [projectRows] = await pool.execute(`
-    SELECT project_name, COUNT(*) AS count
-    FROM member_events
-    WHERE member_id = ?
-      AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-      AND hook_event = 'PostToolUse'
-      AND project_name IS NOT NULL
-    GROUP BY project_name
-    ORDER BY count DESC
-    LIMIT 5
-  `, [memberId]);
+  const nowBucket = minuteBucketKey();
+  const projectSeries = buildSessionActivities(metrics, nowBucket);
+  const recentTokenEvents = pruneRecentTokenEvents(metrics.recentTokenEvents ?? []);
 
   res.json({
     isOnline:      online,
@@ -304,11 +361,8 @@ router.get('/members/:memberId/stats', async (req, res) => {
     toolCallCount: metrics.toolCallCount,
     sessionCount:  metrics.sessionCount,
     cwd:           metrics.cwd,
-    grass,
-    topProjects: projectRows.map(r => ({
-      name:  r.project_name,
-      count: Number(r.count),
-    })),
+    projectSeries,
+    recentTokenEvents,
   });
 });
 

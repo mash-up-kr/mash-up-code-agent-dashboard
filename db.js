@@ -73,6 +73,8 @@ async function initDB() {
       is_creator TINYINT(1)   DEFAULT 0,
       joined_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_group_member (group_id, member_id),
+      INDEX idx_member_group (member_id, group_id),
+      INDEX idx_group_joined (group_id, joined_at),
       FOREIGN KEY (group_id)  REFERENCES \`groups\`(id)  ON DELETE CASCADE,
       FOREIGN KEY (member_id) REFERENCES members(id)     ON DELETE CASCADE
     )
@@ -81,6 +83,12 @@ async function initDB() {
   try {
     await pool.execute("ALTER TABLE group_members ADD COLUMN nickname VARCHAR(50) NOT NULL DEFAULT ''");
   } catch (_) { /* 이미 존재하면 무시 */ }
+  for (const sql of [
+    'ALTER TABLE group_members ADD INDEX idx_member_group (member_id, group_id)',
+    'ALTER TABLE group_members ADD INDEX idx_group_joined (group_id, joined_at)',
+  ]) {
+    try { await pool.execute(sql); } catch (_) {}
+  }
 }
 
 module.exports = { pool, initDB };

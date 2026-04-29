@@ -2891,13 +2891,19 @@ function showCommunityAuthRequired() {
 
 function hideCommunityAuthRequired() {
   document.getElementById('community-auth-required')?.classList.add('hidden');
-  document.getElementById('community-groups')?.classList.remove('hidden');
+  const chatVisible = !document.getElementById('community-chat')?.classList.contains('hidden');
+  if (!chatVisible) {
+    document.getElementById('community-groups')?.classList.remove('hidden');
+  }
 }
 
 // 커뮤니티 탭 클릭 시 목록 갱신
 document.querySelectorAll('.tab-btn').forEach(btn => {
   if (btn.dataset.tab === 'community') {
-    btn.addEventListener('click', refreshGroupList);
+    btn.addEventListener('click', () => {
+      showCommunityGroups();
+      refreshGroupList();
+    });
   }
 });
 
@@ -3241,19 +3247,50 @@ document.getElementById('btn-enter-created-group')?.addEventListener('click', ()
    Community: 그룹 목록 ↔ 채팅 전환
    ══════════════════════════════════════════════════ */
 let _communityStream = null;
+let _cachedGroupMembers = null;
+let _memberGridTimer = null;
+const modalMemberStats = document.getElementById('modal-member-stats');
+const memberStatsState = {
+  member: null,
+  stats: null,
+  activeProject: null,
+};
+
+const SESSION_COLORS = ['#6046ff', '#45dfa4', '#ff6b6b', '#ffd93d', '#6bcfff', '#ff9f43'];
+// 멤버의 프로젝트 목록 전체를 보고 충돌 없이 색상 배분
+function buildProjectColorMap(projects) {
+  const used = new Set();
+  const result = new Map();
+  for (const project of projects) {
+    if (!project || result.has(project)) continue;
+    let hash = 0;
+    for (let i = 0; i < project.length; i++) hash = (hash * 31 + project.charCodeAt(i)) & 0xffffffff;
+    const startIdx = Math.abs(hash) % SESSION_COLORS.length;
+    let assigned = SESSION_COLORS[startIdx];
+    for (let i = 0; i < SESSION_COLORS.length; i++) {
+      const candidate = SESSION_COLORS[(startIdx + i) % SESSION_COLORS.length];
+      if (!used.has(candidate)) { assigned = candidate; break; }
+    }
+    used.add(assigned);
+    result.set(project, assigned);
+  }
+  return result;
+}
 
 function showCommunityGroups() {
   if (_communityStream) { _communityStream.close(); _communityStream = null; }
+  if (_memberGridTimer) { clearInterval(_memberGridTimer); _memberGridTimer = null; }
+  _cachedGroupMembers = null;
   document.getElementById('community-groups')?.classList.remove('hidden');
   document.getElementById('community-chat')?.classList.add('hidden');
 }
 
 
 function getMemberStatus(m) {
-  if (!m.isOnline) return { label: 'IDLE', color: '#6b7280', bg: 'rgba(107,114,128,0.15)', trend: 'FLAT', lineColor: '#2a2c3e' };
+  if (!m.isOnline) return { label: 'IDLE', color: '#6b7280', bg: 'rgba(107,114,128,0.15)', trend: 'FLAT' };
 
-  const act = m.activity || [];
-  if (act.length < 3) return { label: 'CONNECTED', color: '#45dfa4', bg: 'rgba(69,223,164,0.12)', trend: 'NOMINAL', lineColor: '#6046ff' };
+  const act = (m.sessionActivity || []).flatMap(sa => sa.tokens || []);
+  if (act.length < 3) return { label: 'CONNECTED', color: '#45dfa4', bg: 'rgba(69,223,164,0.12)', trend: 'NOMINAL' };
 
   const half  = Math.floor(act.length / 2);
   const first = act.slice(0, half).reduce((a, b) => a + b, 0) / half;
@@ -3264,53 +3301,63 @@ function getMemberStatus(m) {
   const recentPeak = Math.max(...act.slice(-10), 0);
 
   if (variance > 0.65 && recentPeak >= 3)
-    return { label: 'ACTIVE',      color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'ERRATIC', lineColor: '#45dfa4' };
+    return { label: 'ACTIVE',      color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'ERRATIC' };
   if (last > Math.max(first * 1.35, 0.5))
-    return { label: 'PROCESSING',  color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', trend: 'RISING',  lineColor: '#f59e0b' };
+    return { label: 'PROCESSING',  color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', trend: 'RISING' };
   if (first > 0 && last < first * 0.65)
-    return { label: 'SYNCING',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', trend: 'STEADY',  lineColor: '#60a5fa' };
-  return   { label: 'CONNECTED',   color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'NOMINAL', lineColor: '#6046ff' };
+    return { label: 'SYNCING',     color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', trend: 'STEADY' };
+  return   { label: 'CONNECTED',   color: '#45dfa4', bg: 'rgba(69,223,164,0.12)',  trend: 'NOMINAL' };
 }
 
-function renderSparkline(activity, lineColor, uid) {
-  if (!activity || activity.length < 2) return '<div class="flex-1"></div>';
+function renderOverlaidSparklines(sessionActivities, uid, colorMap) {
+  if (!sessionActivities || sessionActivities.length === 0) {
+    return '<div class="flex-1 flex items-center justify-center text-[9px] font-mono text-slate-700">no data</div>';
+  }
   const W = 200, H = 64, pad = 4;
-  const max = Math.max(...activity, 1);
+  const allTokens = sessionActivities.flatMap(sa => sa.tokens || []);
+  const max = Math.max(...allTokens, 1);
 
-  const pts = activity.map((v, i) => {
-    const x = pad + (i / (activity.length - 1)) * (W - pad * 2);
-    const y = H - pad - ((v / max) * (H - pad * 2));
-    return [x, y];
-  });
+  const defs = sessionActivities.map((sa, i) => {
+    const color = colorMap.get(sa.project) || SESSION_COLORS[0];
+    return `<linearGradient id="sg_${uid}_${i}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="${color}" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient>`;
+  }).join('');
 
-  const polyline = pts.map(([x, y]) => `${x},${y}`).join(' ');
+  const layers = sessionActivities.map((sa, i) => {
+    const color = colorMap.get(sa.project) || SESSION_COLORS[0];
+    const activity = sa.tokens || [];
+    if (activity.length < 2) return '';
+    const pts = activity.map((v, j) => {
+      const x = pad + (j / (activity.length - 1)) * (W - pad * 2);
+      const ratio = max > 0 ? Number(v || 0) / max : 0;
+      const y = H - pad - (ratio * (H - pad * 2));
+      return [x, y, v];
+    });
+    // 비어있는 버킷은 건너뛰고 실제 데이터 포인트끼리만 연결
+    const dataPts = pts.filter(([,, v]) => v > 0).map(([x, y]) => [x, y]);
+    if (dataPts.length === 0) return '';
+    const polyline = dataPts.map(([x, y]) => `${x},${y}`).join(' ');
+    const fillPath = [`M ${dataPts[0][0]},${H}`, ...dataPts.map(([x, y]) => `L ${x},${y}`), `L ${dataPts[dataPts.length - 1][0]},${H}`, 'Z'].join(' ');
+    return `
+      <path d="${fillPath}" fill="url(#sg_${uid}_${i})"/>
+      <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).join('');
 
-  const fillPath = [
-    `M ${pts[0][0]},${H}`,
-    ...pts.map(([x, y]) => `L ${x},${y}`),
-    `L ${pts[pts.length - 1][0]},${H}`,
-    'Z',
-  ].join(' ');
-
-  const gradId = `sg_${uid}`;
-  return `
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
-      <defs>
-        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stop-color="${lineColor}" stop-opacity="0.25"/>
-          <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <path d="${fillPath}" fill="url(#${gradId})"/>
-      <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.8"
-                stroke-linejoin="round" stroke-linecap="round"/>
-    </svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
+    <defs>${defs}</defs>${layers}
+  </svg>`;
 }
 
 function renderMemberCard(m) {
   const status  = getMemberStatus(m);
-  const cwdFull = m.cwd || null;
   const glowVia = m.isOnline ? 'via-[#45dfa4]/30' : 'via-[#252838]/60';
+  const allProjects = [...new Set([
+    ...(m.sessionActivity || []).map(sa => sa.project),
+    ...(m.activeProjects || []),
+  ])].filter(Boolean);
+  const colorMap = buildProjectColorMap(allProjects);
 
   return `
     <div class="member-card bg-[#0b0c17] border border-[#1e2030] rounded-xl p-3.5 flex flex-col gap-2.5
@@ -3344,11 +3391,11 @@ function renderMemberCard(m) {
       <!-- 바디: 차트(좌) + 지표(우) -->
       <div class="flex gap-2.5 flex-1 min-h-0" style="min-height:80px">
 
-        <!-- Activity 차트 -->
+        <!-- Activity 차트 (세션별) -->
         <div class="flex flex-col gap-1 flex-1 min-w-0">
-          <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Realtime Usage · Last 60 Min</span>
+          <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Token Usage · Last 60 Min</span>
           <div class="flex-1 min-h-0">
-            ${renderSparkline(m.activity, status.lineColor, m.memberId)}
+            ${renderOverlaidSparklines(m.sessionActivity, m.memberId, colorMap)}
           </div>
           <div class="flex items-center justify-between text-[8px] font-mono text-slate-600 uppercase tracking-widest">
             <span>60m ago</span>
@@ -3363,16 +3410,22 @@ function renderMemberCard(m) {
             <span class="text-[22px] font-bold font-mono text-[#c6bfff] leading-none mt-0.5">${m.toolCallCount.toLocaleString()}</span>
           </div>
           <div class="bg-[#13151f] border border-[#1e2030] rounded-lg px-2.5 py-2 flex flex-col flex-1">
-            <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Sessions</span>
-            <span class="text-[22px] font-bold font-mono text-[#c6bfff] leading-none mt-0.5">${m.sessionCount.toLocaleString()}</span>
+            <span class="text-[8px] font-mono text-slate-600 uppercase tracking-widest">Active Sessions</span>
+            <span class="text-[22px] font-bold font-mono text-[#c6bfff] leading-none mt-0.5">${(m.activeSessionCount ?? 0).toLocaleString()}</span>
           </div>
         </div>
       </div>
 
-      <!-- CWD -->
-      <div class="bg-[#13151f] border border-[#1e2030] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 min-w-0">
-        <span class="material-symbols-outlined flex-shrink-0" style="font-size:12px;color:#4b5563">terminal</span>
-        <span class="text-[9px] font-mono text-slate-500 truncate">${cwdFull ? escapeHtml(cwdFull) : '—'}</span>
+      <!-- Active Projects (세션 색상 매칭) -->
+      <div class="flex flex-wrap gap-1 min-w-0">
+        ${(m.activeProjects && m.activeProjects.length > 0)
+          ? m.activeProjects.map(p => {
+              const color = colorMap.get(p) || SESSION_COLORS[0];
+              return `<span class="px-1.5 py-0.5 rounded text-[9px] font-mono truncate max-w-full"
+                style="background:${color}18;border:1px solid ${color}40;color:${color}">${escapeHtml(p)}</span>`;
+            }).join('')
+          : `<span class="text-[9px] font-mono text-slate-600">—</span>`
+        }
       </div>
 
     </div>`;
@@ -3391,23 +3444,321 @@ function renderMemberGrid(members) {
     return;
   }
 
-  grid.innerHTML = members.map(renderMemberCard).join('');
+  const myId = currentUser?.memberId;
+  const sorted = myId
+    ? [...members].sort((a, b) => (a.memberId === myId ? -1 : b.memberId === myId ? 1 : 0))
+    : members;
+
+  grid.innerHTML = sorted.map(renderMemberCard).join('');
+
+  if (memberStatsState.member) {
+    const refreshed = sorted.find((entry) => Number(entry.memberId) === Number(memberStatsState.member.memberId));
+    if (refreshed) {
+      memberStatsState.member = refreshed;
+      if (memberStatsState.stats) renderMemberStatsModal();
+      else renderMemberStatsLoading(refreshed);
+    }
+  }
 }
+
+function formatCompactTokens(value) {
+  const num = Number(value) || 0;
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+  return String(Math.round(num));
+}
+
+function getProjectNameFromPath(path) {
+  if (!path) return '';
+  return String(path).split('/').filter(Boolean).pop() || '';
+}
+
+function getMemberStatsSubtitle(member, stats) {
+  const latestEventProject = (stats?.recentTokenEvents || [])
+    .slice()
+    .reverse()
+    .find((event) => event?.project)?.project;
+  const activeProject = (member?.activeProjects || []).find(Boolean);
+  const cwdProject = getProjectNameFromPath(member?.cwd);
+  const project = latestEventProject || activeProject || cwdProject;
+  return project ? `${project} 현재 작업 중..` : '최근 60분 토큰 활동';
+}
+
+function closeMemberStatsModal() {
+  memberStatsState.member = null;
+  memberStatsState.stats = null;
+  memberStatsState.activeProject = null;
+  modalMemberStats?.classList.add('hidden');
+  modalMemberStats?.classList.remove('flex');
+}
+
+function setMemberStatsActiveProject(project) {
+  memberStatsState.activeProject = project || null;
+  renderMemberStatsModal();
+}
+
+function renderMemberStatsLoading(member) {
+  if (!modalMemberStats || !member) return;
+  document.getElementById('member-stats-title').textContent = `${member.nickname}`;
+  document.getElementById('member-stats-subtitle').textContent = getMemberStatsSubtitle(member, null);
+  document.getElementById('member-stats-status').textContent = member.isOnline ? 'LIVE' : 'IDLE';
+  document.getElementById('member-stats-status').className = `px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-widest border ${
+    member.isOnline ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' : 'text-slate-400 bg-slate-500/10 border-slate-500/20'
+  }`;
+  document.getElementById('member-stats-tool-calls').textContent = (member.toolCallCount || 0).toLocaleString();
+  document.getElementById('member-stats-sessions').textContent = (member.activeSessionCount || member.sessionCount || 0).toLocaleString();
+  document.getElementById('member-stats-last-active').textContent = member.lastActiveAt ? formatTimeAgo(new Date(member.lastActiveAt).getTime()) : '—';
+  document.getElementById('member-stats-project-chips').innerHTML = '';
+  document.getElementById('member-stats-chart').innerHTML = `
+    <div class="absolute inset-0 flex items-center justify-center text-sm font-mono text-slate-500">
+      Loading token activity...
+    </div>`;
+  document.getElementById('member-stats-events').innerHTML = `
+    <div class="rounded-xl border border-dashed border-[#252838] px-4 py-5 text-center text-xs text-slate-500">
+      최근 이벤트를 불러오는 중입니다.
+    </div>`;
+  document.getElementById('member-stats-event-count').textContent = 'loading';
+}
+
+function renderMemberStatsModal() {
+  const member = memberStatsState.member;
+  const stats = memberStatsState.stats;
+  if (!modalMemberStats || !member || !stats) return;
+
+  const status = getMemberStatus(member);
+  const projectSeries = (stats.projectSeries || member.sessionActivity || []).map((entry) => ({
+    project: entry.project,
+    tokens: entry.tokens || [],
+  })).filter((entry) => entry.project);
+  const recentEvents = (stats.recentTokenEvents || []).filter((event) => (Number(event.tokens) || 0) > 0);
+  const allProjects = [...new Set(projectSeries.map((entry) => entry.project))];
+  const colorMap = buildProjectColorMap(allProjects);
+  if (!memberStatsState.activeProject && allProjects.length === 1) {
+    memberStatsState.activeProject = allProjects[0];
+  }
+  const activeProject = memberStatsState.activeProject;
+
+  document.getElementById('member-stats-title').textContent = `${member.nickname}`;
+  document.getElementById('member-stats-subtitle').textContent = getMemberStatsSubtitle(member, stats);
+  document.getElementById('member-stats-status').textContent = status.label;
+  document.getElementById('member-stats-status').className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-widest border';
+  document.getElementById('member-stats-status').style.color = status.color;
+  document.getElementById('member-stats-status').style.background = status.bg;
+  document.getElementById('member-stats-status').style.borderColor = status.color + '30';
+  document.getElementById('member-stats-tool-calls').textContent = (stats.toolCallCount || member.toolCallCount || 0).toLocaleString();
+  document.getElementById('member-stats-sessions').textContent = (stats.sessionCount || member.sessionCount || 0).toLocaleString();
+  document.getElementById('member-stats-last-active').textContent = stats.lastActiveAt ? formatTimeAgo(new Date(stats.lastActiveAt).getTime()) : '—';
+  document.getElementById('member-stats-event-count').textContent = `${recentEvents.length} events`;
+
+  const chipsEl = document.getElementById('member-stats-project-chips');
+  chipsEl.innerHTML = allProjects.length > 0
+    ? allProjects.map((project) => {
+        const color = colorMap.get(project) || SESSION_COLORS[0];
+        const total = (projectSeries.find((entry) => entry.project === project)?.tokens || []).reduce((sum, value) => sum + Number(value || 0), 0);
+        const emphasized = !activeProject || activeProject === project;
+        return `<button type="button"
+          class="member-stats-project-chip px-3 py-2 rounded-xl border text-left transition-all duration-150 ${emphasized ? 'scale-[1.02]' : ''}"
+          data-project="${esc(project)}"
+          style="background:${color}${emphasized ? '22' : '10'};border-color:${color}${emphasized ? '66' : '33'};color:${color};opacity:${emphasized ? '1' : '0.55'}">
+          <span class="block text-[10px] font-mono uppercase tracking-widest">Project</span>
+          <span class="block text-sm font-semibold text-slate-100 mt-1">${escapeHtml(project)}</span>
+          <span class="block text-[10px] font-mono mt-1">${formatCompactTokens(total)} tokens</span>
+        </button>`;
+      }).join('')
+    : `<div class="text-xs text-slate-500 font-mono">활성 프로젝트가 없습니다.</div>`;
+
+  const chartEl = document.getElementById('member-stats-chart');
+  if (projectSeries.length === 0) {
+    chartEl.innerHTML = `
+      <div class="absolute inset-0 flex items-center justify-center text-sm font-mono text-slate-500">
+        최근 60분 토큰 데이터가 없습니다.
+      </div>`;
+  } else {
+    const width = 640;
+    const height = 300;
+    const padX = 18;
+    const padTop = 18;
+    const padBottom = 44;
+    const chartHeight = height - padTop - padBottom;
+    const maxToken = Math.max(
+      1,
+      ...projectSeries.flatMap((entry) => entry.tokens || []),
+      ...recentEvents.map((event) => Number(event.tokens) || 0)
+    );
+    const gridLines = [0.25, 0.5, 0.75, 1];
+    const windowStart = Date.now() - (60 * 60 * 1000);
+
+    const gridSvg = gridLines.map((ratio) => {
+      const y = padTop + chartHeight - (chartHeight * ratio);
+      const labelValue = Math.round(maxToken * ratio);
+      return `
+        <line x1="${padX}" y1="${y}" x2="${width - padX}" y2="${y}" stroke="#252838" stroke-dasharray="4 5"/>
+        <text x="${padX + 2}" y="${y - 6}" fill="#667085" font-size="10" font-family="monospace">${formatCompactTokens(labelValue)}</text>`;
+    }).join('');
+
+    const projectSvg = projectSeries.map((entry) => {
+      const color = colorMap.get(entry.project) || SESSION_COLORS[0];
+      const emphasized = !activeProject || activeProject === entry.project;
+      const strokeWidth = emphasized ? 3 : 1.8;
+      const opacity = emphasized ? 1 : 0.18;
+      const points = (entry.tokens || []).map((value, index, arr) => {
+        const x = padX + ((width - padX * 2) * (arr.length <= 1 ? 0 : index / (arr.length - 1)));
+        const ratio = maxToken > 0 ? (Number(value) || 0) / maxToken : 0;
+        const y = padTop + chartHeight - (ratio * chartHeight);
+        return { x, y, value: Number(value) || 0 };
+      });
+      const polyline = points.map((point) => `${point.x},${point.y}`).join(' ');
+      const area = [`M ${points[0].x},${height - padBottom}`, ...points.map((point) => `L ${point.x},${point.y}`), `L ${points[points.length - 1].x},${height - padBottom}`, 'Z'].join(' ');
+      const nonZeroDots = points
+        .filter((point) => point.value > 0)
+        .map((point) => `<circle cx="${point.x}" cy="${point.y}" r="${emphasized ? 3.2 : 2.2}" fill="${color}" opacity="${opacity}"></circle>`)
+        .join('');
+      return `
+        <g class="member-stats-series" data-project="${esc(entry.project)}" style="cursor:pointer">
+          <path d="${area}" fill="${color}" opacity="${emphasized ? '0.14' : '0.04'}"></path>
+          <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round"></polyline>
+          ${nonZeroDots}
+        </g>`;
+    }).join('');
+
+    const eventSvg = recentEvents.map((event, index) => {
+      const ts = new Date(event.ts).getTime();
+      if (!Number.isFinite(ts)) return '';
+      const ratioX = Math.min(1, Math.max(0, (ts - windowStart) / (60 * 60 * 1000)));
+      const x = padX + ((width - padX * 2) * ratioX);
+      const ratioY = maxToken > 0 ? (Number(event.tokens) || 0) / maxToken : 0;
+      const y = padTop + chartHeight - (ratioY * chartHeight);
+      const color = colorMap.get(event.project) || SESSION_COLORS[0];
+      const emphasized = !activeProject || activeProject === event.project;
+      const labelY = Math.max(padTop + 12, y - 18 - ((index % 2) * 14));
+      return `
+        <g class="member-stats-event" data-project="${esc(event.project)}" style="cursor:pointer">
+          <line x1="${x}" y1="${height - padBottom}" x2="${x}" y2="${y}" stroke="${color}" opacity="${emphasized ? '0.45' : '0.12'}"/>
+          <circle cx="${x}" cy="${y}" r="${emphasized ? '4.8' : '3.6'}" fill="${color}" opacity="${emphasized ? '1' : '0.25'}"></circle>
+          <rect x="${x - 16}" y="${labelY - 12}" width="32" height="16" rx="8" fill="#0b0d15" stroke="${color}" opacity="${emphasized ? '1' : '0.35'}"></rect>
+          <text x="${x}" y="${labelY}" text-anchor="middle" fill="${emphasized ? '#f8fafc' : '#94a3b8'}" font-size="9" font-family="monospace">${formatCompactTokens(event.tokens)}</text>
+        </g>`;
+    }).join('');
+
+    chartEl.innerHTML = `
+      <svg viewBox="0 0 ${width} ${height}" class="w-full h-full overflow-visible">
+        ${gridSvg}
+        ${projectSvg}
+        ${eventSvg}
+      </svg>`;
+  }
+
+  const eventsEl = document.getElementById('member-stats-events');
+  eventsEl.innerHTML = recentEvents.length > 0
+    ? [...recentEvents].reverse().map((event) => {
+        const color = colorMap.get(event.project) || SESSION_COLORS[0];
+        const emphasized = !activeProject || activeProject === event.project;
+        return `
+          <button type="button"
+            class="member-stats-event-item w-full rounded-xl border px-3 py-3 text-left transition-colors"
+            data-project="${esc(event.project)}"
+            style="border-color:${color}${emphasized ? '55' : '22'};background:${emphasized ? '#121725' : '#0d1018'};opacity:${emphasized ? '1' : '0.58'}">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full" style="background:${color}"></span>
+                  <span class="text-xs font-semibold text-slate-200 truncate">${escapeHtml(event.project || 'unknown')}</span>
+                </div>
+                <p class="text-[10px] font-mono text-slate-500 mt-1">${esc(event.hookEventName || 'Stop')} · ${formatTimeAgo(new Date(event.ts).getTime())}</p>
+              </div>
+              <span class="text-sm font-bold font-mono" style="color:${color}">${formatCompactTokens(event.tokens)}</span>
+            </div>
+          </button>`;
+      }).join('')
+    : `<div class="rounded-xl border border-dashed border-[#252838] px-4 py-5 text-center text-xs text-slate-500">최근 토큰 이벤트가 없습니다.</div>`;
+
+  chipsEl.querySelectorAll('.member-stats-project-chip').forEach((chip) => {
+    chip.addEventListener('mouseenter', () => setMemberStatsActiveProject(chip.dataset.project));
+    chip.addEventListener('focus', () => setMemberStatsActiveProject(chip.dataset.project));
+    chip.addEventListener('mouseleave', () => setMemberStatsActiveProject(null));
+  });
+  chartEl.querySelectorAll('.member-stats-series, .member-stats-event').forEach((node) => {
+    node.addEventListener('mouseenter', () => setMemberStatsActiveProject(node.dataset.project));
+    node.addEventListener('mouseleave', () => setMemberStatsActiveProject(null));
+  });
+  eventsEl.querySelectorAll('.member-stats-event-item').forEach((item) => {
+    item.addEventListener('mouseenter', () => setMemberStatsActiveProject(item.dataset.project));
+    item.addEventListener('mouseleave', () => setMemberStatsActiveProject(null));
+  });
+}
+
+async function openMemberStatsModal(memberId) {
+  const member = (_cachedGroupMembers || []).find((entry) => Number(entry.memberId) === Number(memberId));
+  if (!member || !modalMemberStats) return;
+  memberStatsState.member = member;
+  memberStatsState.stats = null;
+  memberStatsState.activeProject = null;
+  renderMemberStatsLoading(member);
+  modalMemberStats.classList.remove('hidden');
+  modalMemberStats.classList.add('flex');
+
+  try {
+    const res = await fetch(`${COMMUNITY_API}/api/metrics/members/${memberId}/stats`, { credentials: 'include' });
+    if (!res.ok) throw new Error('failed');
+    const stats = await res.json();
+    memberStatsState.stats = stats;
+    renderMemberStatsModal();
+  } catch (_) {
+    document.getElementById('member-stats-chart').innerHTML = `
+      <div class="absolute inset-0 flex items-center justify-center text-sm font-mono text-rose-400">
+        상세 데이터를 불러오지 못했습니다.
+      </div>`;
+  }
+}
+
+document.getElementById('member-grid')?.addEventListener('click', (e) => {
+  const card = e.target.closest('.member-card');
+  if (!card) return;
+  const memberId = Number(card.dataset.memberId);
+  if (memberId) openMemberStatsModal(memberId);
+});
+
+document.getElementById('btn-member-stats-close')?.addEventListener('click', closeMemberStatsModal);
+modalMemberStats?.addEventListener('click', (e) => {
+  if (e.target === modalMemberStats) closeMemberStatsModal();
+});
 
 function showCommunityChat(groupId) {
   document.getElementById('community-groups')?.classList.add('hidden');
   document.getElementById('community-chat')?.classList.remove('hidden');
 
   if (_communityStream) { _communityStream.close(); _communityStream = null; }
+  if (_memberGridTimer) { clearInterval(_memberGridTimer); _memberGridTimer = null; }
 
   _communityStream = new EventSource(
     `${COMMUNITY_API}/api/metrics/groups/${groupId}/sse`,
     { withCredentials: true }
   );
+  function resetMemberGridTimer() {
+    if (_memberGridTimer) { clearInterval(_memberGridTimer); _memberGridTimer = null; }
+    _memberGridTimer = setInterval(() => {
+      if (!_cachedGroupMembers) return;
+      _cachedGroupMembers = _cachedGroupMembers.map(m => ({
+        ...m,
+        sessionActivity: (m.sessionActivity || []).map(sa => ({
+          ...sa,
+          tokens: [...(sa.tokens || []).slice(1), 0],
+        })),
+      }));
+      renderMemberGrid(_cachedGroupMembers);
+    }, 60000);
+  }
+
   _communityStream.addEventListener('message', e => {
-    try { renderMemberGrid(JSON.parse(e.data)); } catch (_) {}
+    try {
+      _cachedGroupMembers = JSON.parse(e.data);
+      renderMemberGrid(_cachedGroupMembers);
+      resetMemberGridTimer();
+    } catch (_) {}
   });
   _communityStream.onerror = () => {};
+
+  resetMemberGridTimer();
 }
 
 document.getElementById('view-community')?.addEventListener('click', e => {
@@ -3588,7 +3939,7 @@ function renderUsageTab(data) {
   const daily          = data?.daily || {};
   const dailyRows      = buildDailyRows(daily);
   const allModelNames  = [...new Set(dailyRows.flatMap(r => Object.keys(r.models)))];
-  const maxTok = Math.max(1, ...dailyRows.map(r => Object.values(r.models).reduce((s, v) => s + v, 0)));
+  const maxTok = Math.max(1, ...dailyRows.map(r => Object.values(r.models).reduce((s, v) => s + Number(v), 0)));
 
   const chartContainer = document.getElementById('chart-stacked-bars');
   chartContainer.innerHTML = dailyRows.map(row => {
@@ -3642,7 +3993,7 @@ function renderUsageTab(data) {
   if (projectEntries.length === 0) {
     tableBody.innerHTML = `<tr><td colspan="5" class="px-6 py-8 text-center text-slate-600 text-xs">데이터 없음 — JSONL 파싱 중이거나 사용 기록이 없습니다</td></tr>`;
   } else {
-    tableBody.innerHTML = projectEntries.flatMap(([projPath, proj], idx) => {
+    tableBody.innerHTML = projectEntries.flatMap(([projPath, proj]) => {
       const projName   = projPath.split('/').filter(Boolean).pop() || projPath;
       const cacheEff   = proj.cacheEfficiency != null ? Math.round(proj.cacheEfficiency * 100) : null;
       const cacheLabel = cacheEff != null ? `${cacheEff}%` : '—';

@@ -5,11 +5,6 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const session        = require('express-session');
-const { initDB }     = require('./db');
-const authRouter             = require('./routes/auth');
-const { router: metricsRouter } = require('./routes/metrics');
-const communityRouter = require('./routes/community');
 const {
   router: usageRouter,
   init: initUsage,
@@ -24,6 +19,7 @@ let initDB = null;
 let communityRouter = null;
 let authRouter = null;
 let chatRouter = null;
+let metricsRouter = null;
 let communityModulesLoaded = false;
 try {
   session         = require('express-session');
@@ -31,6 +27,7 @@ try {
   communityRouter = require('./routes/community');
   authRouter      = require('./routes/auth');
   chatRouter      = require('./routes/chat');
+  metricsRouter   = require('./routes/metrics').router;
   communityModulesLoaded = true;
 } catch (err) {
   console.warn(`[community] 의존성 미설치 — 커뮤니티/인증/채팅 모듈 비활성화: ${err.message}`);
@@ -52,7 +49,7 @@ const clients = new Set();  // SSE clients
 const sessionStats = new Map(); // pid -> { toolCounts, modifiedFiles, eventCount, thinkingStartTs }
 
 // ── Inactivity reaper ───────────────────────────
-const INACTIVE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+const INACTIVE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 setInterval(() => {
   const now = Date.now();
@@ -900,9 +897,9 @@ const requireDb = (_req, res, next) => {
 
 if (communityModulesLoaded) {
   app.use('/api/auth', requireDb, authRouter);
-  app.use('/api/metrics', metricsRouter);
   app.use('/api/community', requireDb, communityRouter);
   app.use('/api/chat', requireDb, chatRouter);
+  app.use('/api/metrics', requireDb, metricsRouter);
 }
 app.use('/api/usage', usageRouter);
 

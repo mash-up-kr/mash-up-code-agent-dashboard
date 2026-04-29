@@ -40,9 +40,10 @@ router.get('/groups', requireAuth, async (req, res) => {
         g.max_members,
         COUNT(all_m.id) AS member_count,
         my_m.is_creator
-      FROM \`groups\` g
-      JOIN group_members my_m  ON my_m.group_id = g.id AND my_m.member_id = ?
+      FROM group_members my_m
+      JOIN \`groups\` g ON g.id = my_m.group_id
       LEFT JOIN group_members all_m ON all_m.group_id = g.id
+      WHERE my_m.member_id = ?
       GROUP BY g.id, g.name, g.code, g.max_members, my_m.is_creator
       ORDER BY g.created_at DESC
     `, [memberId]);
