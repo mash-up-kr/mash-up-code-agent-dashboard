@@ -3,6 +3,7 @@
 const { Router } = require('express');
 const bcrypt     = require('bcrypt');
 const { pool }   = require('../db');
+const chat       = require('./chat');
 
 const router = Router();
 const SALT_ROUNDS = 10;
@@ -61,6 +62,24 @@ router.post('/login', async (req, res) => {
     req.session.memberId = member.id;
     req.session.username = username.trim();
     req.session.name     = member.name;
+
+    // Symmetric to logout: notify all groups the user belongs to that they
+    // are back. Lets other members in the chat see "X님이 그룹에 참여했어요"
+    // when the user re-authenticates after a previous logout.
+    try {
+      const [groupRows] = await pool.execute(
+        'SELECT group_id, nickname FROM group_members WHERE member_id = ?',
+        [member.id]
+      );
+      for (const row of groupRows) {
+        if (row.group_id) {
+          chat.notifyMemberJoined(row.group_id, { memberId: member.id, nickname: row.nickname });
+        }
+      }
+    } catch (e) {
+      console.error('[auth] login notify failed:', e);
+    }
+
     res.json({ memberId: member.id, name: member.name, username: username.trim() });
   } catch (e) {
     console.error(e);
@@ -69,7 +88,27 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/auth/logout — 로그아웃
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
+  const memberId = req.session.memberId;
+  if (memberId) {
+    try {
+      const [rows] = await pool.execute(
+        'SELECT group_id, nickname FROM group_members WHERE member_id = ?',
+        [memberId]
+      );
+      for (const row of rows) {
+        const groupId = row.group_id;
+        if (!groupId) continue;
+        chat.notifyMemberLeft(groupId, { memberId, nickname: row.nickname });
+      }
+      // Close any SSE streams this member still has open, so the presence
+      // grid (mascot count) drops them immediately instead of waiting until
+      // the browser tab closes.
+      chat.kickMember(memberId);
+    } catch (e) {
+      console.error('[auth] logout notify failed:', e);
+    }
+  }
   req.session.destroy(() => res.json({ ok: true }));
 });
 
