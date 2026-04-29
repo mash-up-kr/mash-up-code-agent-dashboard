@@ -62,24 +62,9 @@ router.post('/login', async (req, res) => {
     req.session.memberId = member.id;
     req.session.username = username.trim();
     req.session.name     = member.name;
-
-    // Symmetric to logout: notify all groups the user belongs to that they
-    // are back. Lets other members in the chat see "X님이 그룹에 참여했어요"
-    // when the user re-authenticates after a previous logout.
-    try {
-      const [groupRows] = await pool.execute(
-        'SELECT group_id, nickname FROM group_members WHERE member_id = ?',
-        [member.id]
-      );
-      for (const row of groupRows) {
-        if (row.group_id) {
-          chat.notifyMemberJoined(row.group_id, { memberId: member.id, nickname: row.nickname });
-        }
-      }
-    } catch (e) {
-      console.error('[auth] login notify failed:', e);
-    }
-
+    // Note: login is "presence", not "membership" — online status will appear
+    // automatically via the SSE presence event when the client opens streams.
+    // No member_change broadcast here.
     res.json({ memberId: member.id, name: member.name, username: username.trim() });
   } catch (e) {
     console.error(e);
@@ -88,26 +73,14 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/auth/logout — 로그아웃
-router.post('/logout', async (req, res) => {
+router.post('/logout', (req, res) => {
   const memberId = req.session.memberId;
+  // Logout is a presence change, not a membership change — no member_change
+  // broadcast. Just close any SSE streams this member still has open so
+  // they disappear from the online grid immediately.
   if (memberId) {
-    try {
-      const [rows] = await pool.execute(
-        'SELECT group_id, nickname FROM group_members WHERE member_id = ?',
-        [memberId]
-      );
-      for (const row of rows) {
-        const groupId = row.group_id;
-        if (!groupId) continue;
-        chat.notifyMemberLeft(groupId, { memberId, nickname: row.nickname });
-      }
-      // Close any SSE streams this member still has open, so the presence
-      // grid (mascot count) drops them immediately instead of waiting until
-      // the browser tab closes.
-      chat.kickMember(memberId);
-    } catch (e) {
-      console.error('[auth] logout notify failed:', e);
-    }
+    try { chat.kickMember(memberId); }
+    catch (e) { console.error('[auth] kickMember failed:', e); }
   }
   req.session.destroy(() => res.json({ ok: true }));
 });
