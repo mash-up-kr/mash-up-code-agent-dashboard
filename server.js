@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+<<<<<<< HEAD
 const {
   router: usageRouter,
   init: initUsage,
@@ -14,6 +15,14 @@ const {
 } = require('./routes/usage');
 
 const chat = require('./chat');
+=======
+const session        = require('express-session');
+const { initDB }     = require('./db');
+const communityRouter = require('./routes/community');
+const authRouter      = require('./routes/auth');
+const chatRouter      = require('./routes/chat');
+const { router: usageRouter, init: initUsage, updateRateLimits } = require('./routes/usage');
+>>>>>>> dbedaa2... server.js에 채팅 라우터 마운트 및 옛 어댑터 제거
 
 // 커뮤니티/인증은 선택 의존성 — 미설치 시에도 JSONL/세션 시각화는 동작한다.
 let session = null;
@@ -880,6 +889,7 @@ app.get('/api/events', (req, res) => {
   res.json(events.slice(-100));
 });
 
+<<<<<<< HEAD
 // 커뮤니티 모듈이 로드된 경우에만 라우트를 마운트하고, DB 미연결 시 503으로 가드한다.
 // (모듈 미로드면 라우트 자체가 없으므로 404)
 const dbState = { ready: false };
@@ -897,13 +907,12 @@ if (communityModulesLoaded) {
   app.use('/api/auth', requireDb, authRouter);
   app.use('/api/community', requireDb, communityRouter);
 }
+=======
+app.use('/api/auth', authRouter);
+app.use('/api/community', communityRouter);
+app.use('/api/chat', chatRouter);
+>>>>>>> dbedaa2... server.js에 채팅 라우터 마운트 및 옛 어댑터 제거
 app.use('/api/usage', usageRouter);
-
-// Chat module — delegates /api/chat/* to chat.js (vanilla http handler)
-app.all('/api/chat/*', (req, res) => {
-  const url = new URL(req.originalUrl, `http://localhost:${PORT}`);
-  return chat.handle(req, res, url);
-});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
