@@ -742,8 +742,8 @@
 
       <div class="grid gap-3 sm:grid-cols-2">
         <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4">
-          <p class="text-sm font-bold text-white">1. 로컬 환경에 추가</p>
-          <p class="mt-2 text-xs leading-5 text-slate-400">이 프로젝트 루트에 `.env.local` 파일을 만들고 아래 토큰 한 줄만 넣어주세요.</p>
+          <p class="text-sm font-bold text-white">1. 설치 명령 실행</p>
+          <p class="mt-2 text-xs leading-5 text-slate-400">프로젝트 루트 터미널에서 아래 명령을 한 번만 실행하면 환경 변수가 자동으로 갱신됩니다.</p>
         </div>
         <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4">
           <p class="text-sm font-bold text-white">2. Claude 다시 시작</p>
@@ -753,13 +753,13 @@
 
       <div class="rounded-xl border border-[#252838] bg-[#0d0f18] p-4 space-y-3">
         <div class="flex items-center justify-between gap-3">
-          <span class="text-[11px] font-bold uppercase tracking-widest text-slate-500">.env.local 예시</span>
-          <button id="btn-copy-hook-env" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#252838] text-slate-300 hover:border-[#474556] hover:text-white transition-colors text-xs font-bold cursor-pointer">
+          <span class="text-[11px] font-bold uppercase tracking-widest text-slate-500">자동 설정 명령</span>
+          <button id="btn-copy-hook-install" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6046ff]/15 text-[#c6bfff] hover:bg-[#6046ff]/25 transition-colors text-xs font-bold cursor-pointer">
             <span class="material-symbols-outlined text-[15px]">terminal</span>
-            예시 복사
+            명령 복사
           </button>
         </div>
-        <pre id="hook-token-env-example" class="overflow-x-auto rounded-lg border border-[#252838] bg-[#11131d] px-3 py-3 text-[12px] leading-5 text-slate-300 font-mono"></pre>
+        <pre id="hook-token-install-command" class="overflow-x-auto rounded-lg border border-[#252838] bg-[#11131d] px-3 py-3 text-[12px] leading-5 text-slate-300 font-mono"></pre>
       </div>
 
       <p id="hook-token-copy-feedback" class="text-xs text-emerald-400 hidden">복사됐어요.</p>
@@ -1049,6 +1049,7 @@
   </div>
 </div>
 
+<script src="/config.js"></script>
 <script src="/js/bash-flags.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/chat.js"></script>

@@ -903,6 +903,14 @@ if (communityModulesLoaded) {
 }
 app.use('/api/usage', usageRouter);
 
+app.get('/config.js', (_req, res) => {
+  res.type('application/javascript').send(
+    `window.MASHUP_DASHBOARD_CONFIG = ${JSON.stringify({
+      communityApiUrl: process.env.COMMUNITY_API_URL || '',
+    })};`
+  );
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Start ────────────────────────────────────────
