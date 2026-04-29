@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "install:local": "npm install --omit=optional",
+    "install:community": "npm install --include=optional"
   },
   "repository": {
     "type": "git",
@@ -20,11 +22,13 @@
   },
   "homepage": "https://github.com/mash-up-kr/mash-up-code-agent-dashboard#readme",
   "dependencies": {
-    "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.9.0",
     "chokidar": "^5.0.0",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1",
+    "express": "^5.2.1"
+  },
+  "optionalDependencies": {
+    "bcrypt": "^6.0.0",
     "express-session": "^1.19.0",
     "mysql2": "^3.22.2"
   }

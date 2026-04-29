@@ -116,7 +116,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // 대시보드 탭 렌더링
     if (btn.dataset.tab === 'dashboard') {
       loadUsageSnapshot();
-      connectUsageStream();
     }
   });
 });
@@ -491,6 +490,10 @@ function connect() {
   const es = new EventSource('/api/stream');
 
   es.addEventListener('connected', () => setConnected(true));
+
+  es.addEventListener('usage_update', (e) => {
+    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
+  });
 
   es.addEventListener('init', e => {
     const { sessions: s, events: ev } = JSON.parse(e.data);
@@ -925,10 +928,12 @@ function renderProjectPanel(projects) {
     const lastLabel = activeSessions.length > 0 ? '' : formatLastActivity(proj.lastActivityTs);
 
     // ── Average session length ──
-    const completedSessions = (proj.sessions || []).filter(s => s.endedAt && s.startedAt);
+    const completedSessions = (proj.sessions || [])
+      .map(s => ({ s, end: s.effectiveEndedAt || s.endedAt }))
+      .filter(({ s, end }) => end && s.startedAt && end > s.startedAt);
     let avgSessionLen = 0;
     if (completedSessions.length > 0) {
-      const totalLen = completedSessions.reduce((sum, s) => sum + (s.endedAt - s.startedAt), 0);
+      const totalLen = completedSessions.reduce((sum, { s, end }) => sum + (end - s.startedAt), 0);
       avgSessionLen = totalLen / completedSessions.length;
     }
 
@@ -938,7 +943,8 @@ function renderProjectPanel(projects) {
     let todayDuration = 0;
     for (const s of (proj.sessions || [])) {
       if ((s.startedAt || 0) >= todayTs) {
-        todayDuration += s.endedAt ? (s.endedAt - s.startedAt) : (s.status !== 'ended' ? Date.now() - s.startedAt : 0);
+        const end = s.effectiveEndedAt || s.endedAt;
+        if (end && end > s.startedAt) todayDuration += (end - s.startedAt);
       }
     }
 
@@ -1025,7 +1031,8 @@ function renderProjectPanel(projects) {
 
     // ── Recent sessions ──
     const sessionRows = (proj.sessions || []).slice(0, 5).map(s => {
-      const dur = s.endedAt && s.startedAt ? formatDuration(s.endedAt - s.startedAt) : (s.status !== 'ended' ? 'active' : '-');
+      const end = s.effectiveEndedAt || s.endedAt;
+      const dur = end && s.startedAt ? formatDuration(end - s.startedAt) : (s.status !== 'ended' ? 'active' : '-');
       const statusDot = s.status === 'ended' ? 'bg-slate-500' : 'bg-emerald-500 animate-pulse';
       return `
         <div class="flex items-center gap-2 text-[10px] py-0.5">
@@ -2787,8 +2794,104 @@ function renderGroupCards(groups) {
 
 async function refreshGroupList() {
   const groups = await fetchMyGroups();
-  if (groups === null) { openAuthModal('login'); return; }
+  if (groups === null) {
+    showCommunityAuthRequired();
+    return;
+  }
+  hideCommunityAuthRequired();
   renderGroupCards(groups);
+  applyUnreadBadges();
+}
+
+// Decorate each [data-group-id] card with a KakaoTalk-style red badge
+// showing the unread count, driven by GET /api/chat/unread.
+async function applyUnreadBadges() {
+  let unread;
+  try {
+    const res = await fetch('/api/chat/unread', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const data = await res.json();
+    unread = Array.isArray(data.unread) ? data.unread : [];
+  } catch (_) { return; }
+
+  const counts = new Map(unread.map(u => [Number(u.groupId), Number(u.unreadCount) || 0]));
+  document.querySelectorAll('[data-group-id]').forEach(card => {
+    const gid = Number(card.dataset.groupId);
+    const count = counts.get(gid) || 0;
+    let badge = card.querySelector(':scope > .unread-badge');
+    if (count > 0) {
+      if (!badge) {
+        if (getComputedStyle(card).position === 'static') {
+          card.style.position = 'relative';
+        }
+        badge = document.createElement('span');
+        badge.className = 'unread-badge absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-lg shadow-red-500/30 z-10';
+        card.appendChild(badge);
+      }
+      badge.textContent = count > 99 ? '99+' : String(count);
+    } else if (badge) {
+      badge.remove();
+    }
+  });
+}
+
+// Refresh badges whenever chat.js says local state changed (read marker
+// updated after viewing the active group, or login/active-group switch).
+window.addEventListener('chat:unread-changed', applyUnreadBadges);
+
+// Lightweight polling: every 2s, but only when the user is actually
+// looking at the community group list. Stops automatically while the
+// browser tab is hidden, while the user is on another app tab, or while
+// they're inside a chat room. No SSE on background groups.
+const UNREAD_POLL_INTERVAL_MS = 2000;
+
+function isCommunityGroupListVisible() {
+  if (document.visibilityState && document.visibilityState !== 'visible') return false;
+  const view = document.getElementById('view-community');
+  if (!view || view.classList.contains('hidden')) return false;
+  const groups = document.getElementById('community-groups');
+  return !!(groups && !groups.classList.contains('hidden'));
+}
+
+setInterval(() => {
+  if (isCommunityGroupListVisible()) applyUnreadBadges();
+}, UNREAD_POLL_INTERVAL_MS);
+
+function showCommunityAuthRequired() {
+  const community = document.getElementById('view-community');
+  if (!community) return;
+
+  // Hide the normal sub-views while the auth-required empty state is up.
+  document.getElementById('community-groups')?.classList.add('hidden');
+  document.getElementById('community-chat')?.classList.add('hidden');
+
+  let empty = document.getElementById('community-auth-required');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'community-auth-required';
+    empty.className = 'absolute inset-0 flex flex-col items-center justify-center bg-[#0d0f18] dot-grid';
+    empty.innerHTML = `
+      <div class="w-24 h-24 mb-6 border border-dashed border-[#6046ff]/40 rounded-xl flex items-center justify-center">
+        <span class="material-symbols-outlined text-4xl text-[#6046ff]">lock</span>
+      </div>
+      <p class="text-sm font-headline tracking-widest uppercase text-slate-300 mb-2">Login Required</p>
+      <p class="text-slate-500 text-sm mb-6">로그인 후 사용할 수 있습니다.</p>
+      <button id="btn-community-auth-login"
+              class="px-6 py-2.5 bg-[#6046ff] hover:bg-[#725bff] text-white text-sm font-bold rounded-lg transition-colors cursor-pointer">
+        로그인 / 회원가입
+      </button>
+    `;
+    community.appendChild(empty);
+    empty.querySelector('#btn-community-auth-login')?.addEventListener('click', () => {
+      openAuthModal('login');
+    });
+  }
+  empty.classList.remove('hidden');
+}
+
+function hideCommunityAuthRequired() {
+  document.getElementById('community-auth-required')?.classList.add('hidden');
+  document.getElementById('community-groups')?.classList.remove('hidden');
 }
 
 // 커뮤니티 탭 클릭 시 목록 갱신
@@ -3563,7 +3666,7 @@ function renderUsageTab(data) {
 
       const subheaderRow = `
         <tr class="session-detail hidden border-t border-[#252838]/30">
-          <td class="px-6 py-1.5 pl-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">세션</td>
+          <td class="px-6 py-1.5 pl-12 text-[10px] font-bold text-slate-600 uppercase tracking-widest">세션 (최초 명령어)</td>
           <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">사용 토큰</td>
           <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">최근 사용 모델</td>
           <td class="px-6 py-1.5 text-right text-[10px] font-bold text-slate-600 uppercase tracking-widest">캐시 효율</td>
@@ -3576,9 +3679,14 @@ function renderUsageTab(data) {
         const hasLiveSessionActivity = Number.isFinite(liveSessionActivity) && liveSessionActivity > 0;
         const lastAct = hasLiveSessionActivity ? '실시간' : formatUsageLastActivity(sess.lastActivity);
         const sessionLabel = sess.sessionName || sess.name || '—';
+        const sessionLabelDisplay = sessionLabel === '—' ? sessionLabel : sessionLabel + '...';
+        const sessionIdShort = (sess.sessionId || '').slice(0, 8);
         return `
           <tr class="session-detail hidden bg-[#0d0e15]">
-            <td class="px-6 py-2 pl-12 text-slate-400 text-xs font-mono truncate max-w-0">${esc(sessionLabel)}</td>
+            <td class="px-6 py-2 pl-12">
+              <div class="text-slate-400 text-xs font-mono">${esc(sessionLabelDisplay)}</div>
+              ${sessionIdShort ? `<div class="text-[10px] text-slate-600 font-mono mt-0.5">${esc(sessionIdShort)}</div>` : ''}
+            </td>
             <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${((sess.tokens || 0) / 1000).toFixed(1)}K</td>
             <td class="px-6 py-2 text-right text-slate-400 text-xs whitespace-nowrap">${esc(sess.model || '—')}</td>
             <td class="px-6 py-2 text-right text-slate-400 text-xs font-mono">${sessCacheEff != null ? sessCacheEff + '%' : '—'}</td>
@@ -3662,20 +3770,6 @@ function renderUsageTab(data) {
 }
 
 /* ── Usage SSE + snapshot ────────────────────────── */
-let _usageStream = null;
-
-function connectUsageStream() {
-  if (_usageStream) _usageStream.close();
-  _usageStream = new EventSource('/api/usage/stream');
-  _usageStream.addEventListener('usage_update', (e) => {
-    try { renderUsageTab(JSON.parse(e.data)); } catch (_) {}
-  });
-  _usageStream.addEventListener('error', () => {
-    setTimeout(() => {
-      fetch('/api/usage/snapshot').then(r => r.json()).then(renderUsageTab).catch(() => {});
-    }, 2000);
-  });
-}
 
 function loadUsageSnapshot() {
   fetch('/api/usage/snapshot')

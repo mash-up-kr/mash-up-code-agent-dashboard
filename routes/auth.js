@@ -4,6 +4,7 @@ const { Router } = require('express');
 const bcrypt     = require('bcrypt');
 const crypto     = require('crypto');
 const { pool }   = require('../db');
+const chat       = require('./chat');
 
 const router = Router();
 const SALT_ROUNDS = 10;
@@ -68,6 +69,9 @@ router.post('/login', async (req, res) => {
     req.session.memberId = member.id;
     req.session.username = username.trim();
     req.session.name     = member.name;
+    // Note: login is "presence", not "membership" — online status will appear
+    // automatically via the SSE presence event when the client opens streams.
+    // No member_change broadcast here.
     res.json({ memberId: member.id, name: member.name, username: username.trim() });
   } catch (e) {
     console.error(e);
@@ -77,6 +81,14 @@ router.post('/login', async (req, res) => {
 
 // POST /api/auth/logout — 로그아웃
 router.post('/logout', (req, res) => {
+  const memberId = req.session.memberId;
+  // Logout is a presence change, not a membership change — no member_change
+  // broadcast. Just close any SSE streams this member still has open so
+  // they disappear from the online grid immediately.
+  if (memberId) {
+    try { chat.kickMember(memberId); }
+    catch (e) { console.error('[auth] kickMember failed:', e); }
+  }
   req.session.destroy(() => res.json({ ok: true }));
 });
 
