@@ -13,6 +13,8 @@ const {
   getUsageState,
 } = require('./routes/usage');
 
+const chat = require('./chat');
+
 // 커뮤니티/인증은 선택 의존성 — 미설치 시에도 JSONL/세션 시각화는 동작한다.
 let session = null;
 let initDB = null;
@@ -896,6 +898,12 @@ if (communityModulesLoaded) {
   app.use('/api/community', requireDb, communityRouter);
 }
 app.use('/api/usage', usageRouter);
+
+// Chat module — delegates /api/chat/* to chat.js (vanilla http handler)
+app.all('/api/chat/*', (req, res) => {
+  const url = new URL(req.originalUrl, `http://localhost:${PORT}`);
+  return chat.handle(req, res, url);
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
