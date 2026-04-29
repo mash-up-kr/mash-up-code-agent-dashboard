@@ -23,6 +23,7 @@
 
   let me = null;                            // { memberId, name, username }
   let activeGroupId = null;
+  let pickerVisible = false;                // overlay group picker over the active chat
   const groupConnections = new Map();       // groupId -> Connection
 
   // ─── Auth ──────────────────────────────────────────────────
@@ -252,7 +253,7 @@
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       conn.messages = msgs.slice();
       conn.renderedIds = new Set(msgs.map(m => m.id).filter(x => x != null));
-      if (id === activeGroupId) renderActive();
+      if (id === activeGroupId && !pickerVisible) renderActive();
     });
 
     es.addEventListener('chat', (e) => {
@@ -260,7 +261,7 @@
       if (m.id != null && conn.renderedIds.has(m.id)) return;
       if (m.id != null) conn.renderedIds.add(m.id);
       pushBufferEntry(conn, m);
-      if (id === activeGroupId) appendMessageUI(m);
+      if (id === activeGroupId && !pickerVisible) appendMessageUI(m);
     });
 
     es.addEventListener('member_change', (e) => {
@@ -277,7 +278,7 @@
         ? `${nick}님이 그룹에 참여했어요`
         : `${nick}님이 그룹을 떠났어요`;
       pushBufferEntry(conn, { _system: true, text });
-      if (id === activeGroupId) appendSystemUI(text);
+      if (id === activeGroupId && !pickerVisible) appendSystemUI(text);
     });
 
     es.addEventListener('presence', (e) => {
@@ -334,7 +335,8 @@
 
   function setActiveGroup(groupId) {
     const id = Number(groupId);
-    if (!id || id === activeGroupId) return;
+    if (!id) return;
+    pickerVisible = false;                // closing picker if open
     ensureConnection(id);                 // open if not already
     activeGroupId = id;
     setInputsDisabled(false, '메시지를 입력하세요...');
@@ -418,18 +420,94 @@
         </button>
       </div>
     `;
+    const headerLabel = activeGroupId ? '채팅방 변경' : '참여 중인 그룹 (선택해서 입장)';
+    const cancelBtn = activeGroupId ? `
+      <button class="chat-picker-cancel w-full text-center mb-3 text-[11px] text-slate-400 hover:text-slate-200 transition-colors cursor-pointer py-2 border border-[#252838] rounded-lg hover:border-[#6046ff]/40">
+        ← 현재 채팅으로 돌아가기
+      </button>
+    ` : '';
     const listHtml = groups.length === 0 ? emptyHtml : `
       <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3 px-1">
-        참여 중인 그룹 (선택해서 입장)
+        ${headerLabel}
       </div>
-      ${groups.map(g => `
-        <button class="chat-pick-group w-full text-left p-3 mb-2 bg-[#1c1f2e] border border-[#252838] hover:border-[#6046ff]/50 hover:bg-[#1c1f2e]/80 rounded-lg transition-colors cursor-pointer" data-group-id="${g.id}">
-          <div class="font-bold text-sm text-slate-200 mb-1 truncate">${escHtml(g.name)}</div>
-          <div class="text-[10px] text-slate-500 font-mono">${g.memberCount}/${g.maxMembers} MEMBERS</div>
-        </button>
-      `).join('')}
+      ${cancelBtn}
+      ${groups.map(g => {
+        const isCurrent = Number(g.id) === Number(activeGroupId);
+        const cardClass = isCurrent
+          ? 'bg-[#6046ff]/15 border-[#6046ff]/60'
+          : 'bg-[#1c1f2e] border-[#252838] hover:border-[#6046ff]/50 hover:bg-[#1c1f2e]/80';
+        const badge = isCurrent
+          ? '<span class="text-[9px] text-[#6046ff] font-mono uppercase font-bold">current</span>'
+          : '';
+        return `
+          <button class="chat-pick-group w-full text-left p-3 mb-2 ${cardClass} border rounded-lg transition-colors cursor-pointer" data-group-id="${g.id}">
+            <div class="flex items-baseline justify-between gap-2 mb-1">
+              <div class="font-bold text-sm text-slate-200 truncate">${escHtml(g.name)}</div>
+              ${badge}
+            </div>
+            <div class="text-[10px] text-slate-500 font-mono">${g.memberCount}/${g.maxMembers} MEMBERS</div>
+          </button>
+        `;
+      }).join('')}
     `;
     eachHost(({ messagesEl }) => { messagesEl.innerHTML = listHtml; });
+  }
+
+  // ─── Room switcher (the "..." button in the drawer header) ────
+
+  async function openRoomPicker() {
+    if (!me) {
+      appendSystemUI('로그인 후 이용할 수 있어요.');
+      return;
+    }
+    pickerVisible = true;
+    setInputsDisabled(true, '채팅방을 선택해주세요...');
+    let groups = [];
+    try {
+      const res = await fetch('/api/community/groups', { credentials: 'same-origin' });
+      if (res.ok) groups = await res.json();
+    } catch (_) { /* ignore */ }
+    if (!Array.isArray(groups)) groups = [];
+    showGroupPicker(groups);
+  }
+
+  function closeRoomPicker() {
+    pickerVisible = false;
+    if (activeGroupId) {
+      setInputsDisabled(false, '메시지를 입력하세요...');
+      renderActive();
+    } else {
+      setInputsDisabled(true, '그룹에 입장하면 채팅이 시작됩니다.');
+      renderIdleState();
+    }
+  }
+
+  function toggleRoomPicker() {
+    if (pickerVisible) closeRoomPicker();
+    else openRoomPicker();
+  }
+
+  // The drawer's header has a generic "..." (more_vert) button with no id —
+  // hook into it so users can switch rooms without going through the
+  // community tab.
+  function bindDrawerRoomSwitcher() {
+    const drawer = document.getElementById('chat-drawer');
+    if (!drawer) return;
+    const buttons = drawer.querySelectorAll('button');
+    for (const btn of buttons) {
+      const icon = btn.querySelector('.material-symbols-outlined');
+      if (!icon) continue;
+      if (icon.textContent.trim() !== 'more_vert') continue;
+      if (btn.dataset.chatRoomswitchBound === '1') return;
+      btn.dataset.chatRoomswitchBound = '1';
+      btn.title = '채팅방 변경';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleRoomPicker();
+      });
+      return;
+    }
   }
 
   // ─── Input binding ─────────────────────────────────────────
@@ -537,6 +615,7 @@
     bindInputs();
     bindCommunityNavigation();
     bindCommunityChatVisibility();
+    bindDrawerRoomSwitcher();
     clearMessagesUI();
 
     await refreshAuth();
@@ -545,6 +624,7 @@
       bindInputs();
       bindCommunityNavigation();
       bindCommunityChatVisibility();
+      bindDrawerRoomSwitcher();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
@@ -562,6 +642,10 @@
       if (pick) {
         const id = Number(pick.dataset.groupId);
         if (id) setActiveGroup(id);
+        return;
+      }
+      if (e.target.closest('.chat-picker-cancel')) {
+        closeRoomPicker();
         return;
       }
       if (e.target.closest('.chat-go-community')) {
