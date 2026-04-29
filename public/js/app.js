@@ -2530,7 +2530,7 @@ document.getElementById('btn-logout')?.addEventListener('click', async () => {
   const confirmed = await showConfirm('로그아웃 하시겠습니까?', '로그아웃');
   if (!confirmed) return;
 
-  await fetch(`${COMMUNITY_API}/api/auth/logout`, { method: 'POST' });
+  await fetch(`${COMMUNITY_API}/api/auth/logout`, { method: 'POST', credentials: 'include' });
   currentUser = null;
   currentHookToken = null;
   showCommunityGroups();
@@ -2546,7 +2546,7 @@ let currentHookToken = null;
 
 async function ensureCommunityHookToken() {
   if (currentHookToken) return currentHookToken;
-  const res = await fetch(`${COMMUNITY_API}/api/metrics/token`);
+  const res = await fetch(`${COMMUNITY_API}/api/metrics/token`, { credentials: 'include' });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Claude 토큰을 불러오지 못했습니다.');
   currentHookToken = data.token;
@@ -2602,7 +2602,7 @@ function closeHookTokenModal() {
 
 async function checkAuth() {
   try {
-    const res = await fetch(`${COMMUNITY_API}/api/auth/me`);
+    const res = await fetch(`${COMMUNITY_API}/api/auth/me`, { credentials: 'include' });
     if (!res.ok) { currentUser = null; currentHookToken = null; return false; }
     currentUser = await res.json();
     return true;
@@ -2677,6 +2677,7 @@ document.getElementById('btn-login-submit')?.addEventListener('click', async () 
   try {
     const res  = await fetch(`${COMMUNITY_API}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ username, password }),
     });
     const data = await res.json();
@@ -2709,6 +2710,7 @@ document.getElementById('btn-register-submit')?.addEventListener('click', async 
   try {
     const res  = await fetch(`${COMMUNITY_API}/api/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ username, password, name }),
     });
     const data = await res.json();
@@ -2739,7 +2741,7 @@ function escapeHtml(str) {
 
 async function fetchMyGroups() {
   try {
-    const res = await fetch(`${COMMUNITY_API}/api/community/groups`);
+    const res = await fetch(`${COMMUNITY_API}/api/community/groups`, { credentials: 'include' });
     if (res.status === 401) return null; // 미로그인
     if (!res.ok) return [];
     return await res.json();
@@ -2808,7 +2810,7 @@ async function refreshGroupList() {
 async function applyUnreadBadges() {
   let unread;
   try {
-    const res = await fetch('/api/chat/unread', { credentials: 'same-origin' });
+    const res = await fetch(`${COMMUNITY_API}/api/chat/unread`, { credentials: 'include' });
     if (!res.ok) return;
     const data = await res.json();
     unread = Array.isArray(data.unread) ? data.unread : [];
@@ -3015,6 +3017,7 @@ document.getElementById('group-cards')?.addEventListener('click', async e => {
       const res  = await fetch(`${COMMUNITY_API}/api/community/groups/${groupId}/leave`, {
         method:  'DELETE',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body:    JSON.stringify({}),
       });
       const data = await res.json();
@@ -3092,7 +3095,7 @@ document.getElementById('btn-join-verify')?.addEventListener('click', async () =
   verifyBtn.textContent = '확인 중...';
 
   try {
-    const res  = await fetch(`${COMMUNITY_API}/api/community/groups/verify?code=${encodeURIComponent(code)}`);
+    const res  = await fetch(`${COMMUNITY_API}/api/community/groups/verify?code=${encodeURIComponent(code)}`, { credentials: 'include' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '오류가 발생했습니다.');
 
@@ -3131,6 +3134,7 @@ document.getElementById('btn-join-confirm')?.addEventListener('click', async () 
     const res  = await fetch(`${COMMUNITY_API}/api/community/groups/join`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body:    JSON.stringify({ code, nickname: document.getElementById('input-join-nickname').value.trim() }),
     });
     const data = await res.json();
@@ -3203,6 +3207,7 @@ document.getElementById('btn-create-submit')?.addEventListener('click', async ()
     const res  = await fetch(`${COMMUNITY_API}/api/community/groups`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body:    JSON.stringify({ name: groupName, nickname }),
     });
     const data = await res.json();
@@ -3249,6 +3254,7 @@ document.getElementById('btn-enter-created-group')?.addEventListener('click', ()
 let _communityStream = null;
 let _cachedGroupMembers = null;
 let _memberGridTimer = null;
+let _memberStatsRefreshTimer = null;
 const modalMemberStats = document.getElementById('modal-member-stats');
 const memberStatsState = {
   member: null,
@@ -3488,6 +3494,10 @@ function closeMemberStatsModal() {
   memberStatsState.member = null;
   memberStatsState.stats = null;
   memberStatsState.activeProject = null;
+  if (_memberStatsRefreshTimer) {
+    clearTimeout(_memberStatsRefreshTimer);
+    _memberStatsRefreshTimer = null;
+  }
   modalMemberStats?.classList.add('hidden');
   modalMemberStats?.classList.remove('flex');
 }
@@ -3711,6 +3721,27 @@ async function openMemberStatsModal(memberId) {
   }
 }
 
+function scheduleMemberStatsRefresh(delay = 150) {
+  const memberId = memberStatsState.member?.memberId;
+  if (!memberId || !memberStatsState.stats) return;
+  if (_memberStatsRefreshTimer) clearTimeout(_memberStatsRefreshTimer);
+
+  _memberStatsRefreshTimer = setTimeout(async () => {
+    _memberStatsRefreshTimer = null;
+    const activeMemberId = memberStatsState.member?.memberId;
+    if (!activeMemberId || Number(activeMemberId) !== Number(memberId)) return;
+
+    try {
+      const res = await fetch(`${COMMUNITY_API}/api/metrics/members/${memberId}/stats`, { credentials: 'include' });
+      if (!res.ok) return;
+      const stats = await res.json();
+      if (Number(memberStatsState.member?.memberId) !== Number(memberId)) return;
+      memberStatsState.stats = stats;
+      renderMemberStatsModal();
+    } catch (_) {}
+  }, delay);
+}
+
 document.getElementById('member-grid')?.addEventListener('click', (e) => {
   const card = e.target.closest('.member-card');
   if (!card) return;
@@ -3753,6 +3784,7 @@ function showCommunityChat(groupId) {
     try {
       _cachedGroupMembers = JSON.parse(e.data);
       renderMemberGrid(_cachedGroupMembers);
+      scheduleMemberStatsRefresh();
       resetMemberGridTimer();
     } catch (_) {}
   });
