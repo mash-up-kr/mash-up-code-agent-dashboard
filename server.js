@@ -13,20 +13,22 @@ const {
   getUsageState,
 } = require('./routes/usage');
 
-// 커뮤니티/인증은 선택 의존성 — 미설치 시에도 JSONL/세션 시각화는 동작한다.
+// 커뮤니티/인증/채팅은 선택 의존성 — MySQL 미설치 시에도 JSONL/세션 시각화는 동작한다.
 let session = null;
 let initDB = null;
 let communityRouter = null;
 let authRouter = null;
+let chatRouter = null;
 let communityModulesLoaded = false;
 try {
   session         = require('express-session');
   ({ initDB }     = require('./db'));
   communityRouter = require('./routes/community');
   authRouter      = require('./routes/auth');
+  chatRouter      = require('./routes/chat');
   communityModulesLoaded = true;
 } catch (err) {
-  console.warn(`[community] 의존성 미설치 — 커뮤니티/인증 모듈 비활성화: ${err.message}`);
+  console.warn(`[community] 의존성 미설치 — 커뮤니티/인증/채팅 모듈 비활성화: ${err.message}`);
   console.warn('  npm run install:community 로 활성화할 수 있어요.');
 }
 
@@ -878,14 +880,14 @@ app.get('/api/events', (req, res) => {
   res.json(events.slice(-100));
 });
 
-// 커뮤니티 모듈이 로드된 경우에만 라우트를 마운트하고, DB 미연결 시 503으로 가드한다.
-// (모듈 미로드면 라우트 자체가 없으므로 404)
+// 커뮤니티/인증/채팅 모듈이 로드된 경우에만 라우트를 마운트하고,
+// DB 미연결 시 503으로 가드한다. (모듈 미로드면 라우트 자체가 없으므로 404)
 const dbState = { ready: false };
 const requireDb = (_req, res, next) => {
   if (!dbState.ready) {
     return res.status(503).json({
       error: 'community_disabled',
-      message: 'MySQL이 연결되지 않아 커뮤니티/인증 기능이 비활성 상태예요.',
+      message: 'MySQL이 연결되지 않아 커뮤니티/인증/채팅 기능이 비활성 상태예요.',
     });
   }
   next();
@@ -894,6 +896,7 @@ const requireDb = (_req, res, next) => {
 if (communityModulesLoaded) {
   app.use('/api/auth', requireDb, authRouter);
   app.use('/api/community', requireDb, communityRouter);
+  app.use('/api/chat', requireDb, chatRouter);
 }
 app.use('/api/usage', usageRouter);
 
