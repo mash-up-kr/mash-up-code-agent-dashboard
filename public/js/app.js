@@ -3490,8 +3490,15 @@ function getMemberStatsSubtitle(member, stats) {
     .find((event) => event?.project)?.project;
   const activeProject = (member?.activeProjects || []).find(Boolean);
   const cwdProject = getProjectNameFromPath(member?.cwd);
-  const project = latestEventProject || activeProject || cwdProject;
-  return project ? `${project} 현재 작업 중..` : '최근 60분 토큰 활동';
+  const hasActiveSession = Boolean(member?.isOnline && Number(member?.activeSessionCount || 0) > 0);
+
+  if (hasActiveSession) {
+    const project = activeProject || cwdProject || latestEventProject;
+    return project ? `${project} 현재 작업 중..` : '현재 작업 중..';
+  }
+
+  const lastProject = latestEventProject || cwdProject;
+  return lastProject ? `${lastProject} 마지막 활동` : '최근 60분 토큰 활동';
 }
 
 function closeMemberStatsModal() {
