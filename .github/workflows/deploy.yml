@@ -27,7 +27,8 @@ jobs:
             --exclude='.env' \
             --exclude='.env.local' \
             --exclude='.env.production' \
-            -czf release.tar.gz .
+            -czf /tmp/release.tar.gz .
+          mv /tmp/release.tar.gz release.tar.gz
 
       - name: Prepare remote directory
         uses: appleboy/ssh-action@v1.2.0
