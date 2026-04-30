@@ -1,7 +1,8 @@
 'use strict';
 
 const DEFAULT_COMMUNITY_API = 'http://223.130.141.52:4321';
-const COMMUNITY_API = window.MASHUP_DASHBOARD_CONFIG?.communityApiUrl || DEFAULT_COMMUNITY_API;
+const COMMUNITY_API = window.MASHUP_DASHBOARD_CONFIG?.communityApiUrl || window.location.origin;
+const COMMUNITY_HOOK_API = window.MASHUP_DASHBOARD_CONFIG?.communityHookApiUrl || DEFAULT_COMMUNITY_API;
 
 /* ══════════════════════════════════════════════════
    DOM References
@@ -2557,7 +2558,7 @@ function shellQuote(value) {
 }
 
 function buildHookEnvInstallCommand(token) {
-  return `curl -fsSL ${COMMUNITY_API}/api/metrics/env-installer | sh -s -- ${shellQuote(token)} ${shellQuote(COMMUNITY_API)}`;
+  return `curl -fsSL ${COMMUNITY_HOOK_API}/api/metrics/env-installer | sh -s -- ${shellQuote(token)} ${shellQuote(COMMUNITY_HOOK_API)}`;
 }
 
 function showHookTokenFeedback(message, isError = false) {

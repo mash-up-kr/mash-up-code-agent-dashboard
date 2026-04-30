@@ -4,6 +4,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 require('dotenv').config();
 require('dotenv').config({ path: path.join(__dirname, '.env.local'), override: true });
 const {
@@ -38,6 +39,8 @@ try {
 const app = express();
 const PORT = process.env.AGENT_VIZ_PORT || 4321;
 const DATA_DIR = path.join(__dirname, 'data');
+const DEFAULT_COMMUNITY_API_URL = 'http://223.130.141.52:4321';
+const COMMUNITY_API_URL = process.env.COMMUNITY_API_URL || DEFAULT_COMMUNITY_API_URL;
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -109,6 +112,57 @@ function addEvent(entry) {
   events.push(entry);
   if (events.length > 200) events.shift();
   broadcast('event', entry);
+}
+
+function shouldProxyCommunityApi() {
+  if (!COMMUNITY_API_URL) return false;
+  try {
+    const target = new URL(COMMUNITY_API_URL);
+    return !['localhost', '127.0.0.1', '::1'].includes(target.hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function proxyCommunityRequest(req, res) {
+  const targetUrl = new URL(req.originalUrl, COMMUNITY_API_URL);
+  const headers = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    const lower = key.toLowerCase();
+    if (['host', 'connection', 'content-length'].includes(lower)) continue;
+    headers[key] = value;
+  }
+
+  const init = {
+    method: req.method,
+    headers,
+    redirect: 'manual',
+  };
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    init.body = req.is('application/json') ? JSON.stringify(req.body ?? {}) : req.body;
+  }
+
+  try {
+    const upstream = await fetch(targetUrl, init);
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (['content-encoding', 'content-length', 'transfer-encoding'].includes(lower)) return;
+      if (lower === 'set-cookie') {
+        res.append('Set-Cookie', value);
+      } else {
+        res.setHeader(key, value);
+      }
+    });
+
+    if (!upstream.body) return res.end();
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (err) {
+    res.status(502).json({
+      error: 'community_proxy_failed',
+      message: '커뮤니티 서버에 연결하지 못했습니다.',
+    });
+  }
 }
 
 function getToolDetail(toolName, input) {
@@ -722,6 +776,10 @@ if (session) {
   }));
 }
 
+if (shouldProxyCommunityApi()) {
+  app.use(['/api/auth', '/api/community', '/api/chat', '/api/metrics'], proxyCommunityRequest);
+}
+
 // ── Routes ───────────────────────────────────────
 
 app.get('/api/stream', (req, res) => {
@@ -907,7 +965,8 @@ app.use('/api/usage', usageRouter);
 app.get('/config.js', (_req, res) => {
   res.type('application/javascript').send(
     `window.MASHUP_DASHBOARD_CONFIG = ${JSON.stringify({
-      communityApiUrl: process.env.COMMUNITY_API_URL || 'http://223.130.141.52:4321',
+      communityApiUrl: '',
+      communityHookApiUrl: COMMUNITY_API_URL,
     })};`
   );
 });
