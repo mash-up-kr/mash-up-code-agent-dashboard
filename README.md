@@ -17,7 +17,7 @@ For GitHub Actions deployment, add these repository secrets:
 
 - `DEPLOY_HOST`
 - `DEPLOY_USER`
-- `DEPLOY_SSH_KEY`
+- `DEPLOY_PASSWORD`
 - `DEPLOY_PATH`
 - `DEPLOY_PORT` optional, defaults to `22`
 
