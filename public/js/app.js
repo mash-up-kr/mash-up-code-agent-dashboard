@@ -1,6 +1,7 @@
 'use strict';
 
-const COMMUNITY_API = window.MASHUP_DASHBOARD_CONFIG?.communityApiUrl || window.location.origin;
+const DEFAULT_COMMUNITY_API = 'http://223.130.141.52:4321';
+const COMMUNITY_API = window.MASHUP_DASHBOARD_CONFIG?.communityApiUrl || DEFAULT_COMMUNITY_API;
 
 /* ══════════════════════════════════════════════════
    DOM References
