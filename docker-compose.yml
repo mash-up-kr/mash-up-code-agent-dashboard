@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-ghcr.io/mash-up-kr/mash-up-code-agent-dashboard:latest}
     container_name: mashup-dashboard-app
     restart: unless-stopped
     env_file:
