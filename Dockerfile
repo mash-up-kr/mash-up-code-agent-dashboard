@@ -8,12 +8,12 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
+COPY --chown=node:node package*.json ./
 RUN npm ci --include=optional --omit=dev
 
-COPY . .
+COPY --chown=node:node . .
 RUN mkdir -p /app/data \
-  && chown -R node:node /app
+  && chown node:node /app/data
 
 USER node
 
