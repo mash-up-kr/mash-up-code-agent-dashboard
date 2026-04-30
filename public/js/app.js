@@ -3608,6 +3608,16 @@ function renderMemberStatsModal() {
         <text x="${padX + 2}" y="${y - 6}" fill="#667085" font-size="10" font-family="monospace">${formatCompactTokens(labelValue)}</text>`;
     }).join('');
 
+    const xAxisSvg = [60, 50, 40, 30, 20, 10, 0].map((minutesAgo) => {
+      const ratio = (60 - minutesAgo) / 60;
+      const x = padX + ((width - padX * 2) * ratio);
+      const label = minutesAgo === 0 ? 'now' : `${minutesAgo}m`;
+      const anchor = minutesAgo === 60 ? 'start' : minutesAgo === 0 ? 'end' : 'middle';
+      return `
+        <line x1="${x}" y1="${padTop}" x2="${x}" y2="${height - padBottom}" stroke="#1c1f2e" stroke-dasharray="2 4"/>
+        <text x="${x}" y="${height - padBottom + 14}" text-anchor="${anchor}" fill="#4b5563" font-size="9" font-family="monospace">${label}</text>`;
+    }).join('');
+
     const projectSvg = projectSeries.map((entry) => {
       const color = colorMap.get(entry.project) || SESSION_COLORS[0];
       const emphasized = !activeProject || activeProject === entry.project;
@@ -3654,6 +3664,7 @@ function renderMemberStatsModal() {
 
     chartEl.innerHTML = `
       <svg viewBox="0 0 ${width} ${height}" class="w-full h-full overflow-visible">
+        ${xAxisSvg}
         ${gridSvg}
         ${projectSvg}
         ${eventSvg}
